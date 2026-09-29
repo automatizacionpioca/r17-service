@@ -58,6 +58,39 @@
   color:#16803a;
   font-weight:700;
 }
+
+.previewCommercial{
+  background:#f7f9fc;
+  border:1px solid #dce3ec;
+  border-radius:16px;
+  padding:16px;
+  margin-top:14px;
+  color:#233143;
+}
+.previewCommercial h3{
+  margin:0 0 12px;
+  color:#0d56a3;
+  font-size:18px;
+}
+.previewLine{
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  padding:8px 0;
+  border-bottom:1px solid #e6ebf1;
+}
+.previewLine:last-child{border-bottom:0}
+.previewLine span{color:#677385}
+.previewLine b{text-align:right}
+.previewTotal{
+  font-size:20px;
+  color:#0d56a3;
+}
+.previewItems{
+  margin-top:10px;
+  padding-top:8px;
+  border-top:1px solid #e6ebf1;
+}
 </style>
 </head>
 <body>
@@ -174,8 +207,32 @@
       </div>
 
       <button class="azul" id="previewBtn">VISTA PREVIA</button>
-      <div id="preview" class="status warn hidden">
-        La estructura está lista. Falta conectar Google Routes y la base para obtener el importe real.
+      <div id="previewError" class="status warn hidden"></div>
+
+      <div id="preview" class="previewCommercial hidden">
+        <h3>Resumen del servicio</h3>
+
+        <div class="previewLine">
+          <span>Ubicación</span>
+          <b id="previewLocation">—</b>
+        </div>
+
+        <div class="previewLine">
+          <span>Tiempo invertido en el servicio</span>
+          <b id="previewTime">—</b>
+        </div>
+
+        <div id="previewItems" class="previewItems hidden"></div>
+
+        <div class="previewLine">
+          <span>Total efectivo</span>
+          <b class="previewTotal" id="previewCash">—</b>
+        </div>
+
+        <div class="previewLine">
+          <span>Total Masiva</span>
+          <b class="previewTotal" id="previewMassive">—</b>
+        </div>
       </div>
     </div>
 
@@ -190,6 +247,7 @@ const CFG_KEY='r17_cfg_v1';
 const ROUTER_URL='https://apxrmkdegjnblkbyjsbp.supabase.co/functions/v1/r17-router';
 const SUPABASE_PUBLISHABLE='sb_publishable_htgEX8HiRGAjpCVhPw1gfg_tOPxkJoI';
 let currentRoute=null;
+let currentContext=null;
 let selectedCustomerPlaceId=null;
 let autocompleteTimer=null;
 let autocompleteSeq=0;
@@ -319,6 +377,152 @@ async function calculateRoute(origin,destination){
   return data;
 }
 
+
+function num(v){
+  const n=Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function money(v){
+  return new Intl.NumberFormat('es-AR',{
+    style:'currency',
+    currency:'ARS',
+    maximumFractionDigits:0
+  }).format(num(v));
+}
+
+function minutesText(value){
+  const min=Math.max(0,Math.round(num(value)));
+  const h=Math.floor(min/60);
+  const m=min%60;
+
+  if(h && m) return h+' h '+m+' min';
+  if(h) return h+' h';
+  return m+' min';
+}
+
+function serviceLaborMinutes(){
+  const st=readState();
+  if(!st || !st.startAt || !st.endAt) return 0;
+  return Math.max(0,(st.endAt-st.startAt)/60000);
+}
+
+function configReady(cfg){
+  return (
+    cfg &&
+    num(cfg.km)>=0 &&
+    num(cfg.travel)>=0 &&
+    num(cfg.labor)>=0 &&
+    num(cfg.toll)>=0 &&
+    num(cfg.massive)>=0 &&
+    String(cfg.km??'').trim()!=='' &&
+    String(cfg.travel??'').trim()!=='' &&
+    String(cfg.labor??'').trim()!=='' &&
+    String(cfg.toll??'').trim()!==''
+  );
+}
+
+function calculateAmounts(){
+  const cfg=readConfig();
+
+  if(!configReady(cfg)){
+    throw new Error('Faltan completar valores económicos en Configuración.');
+  }
+
+  if(!currentRoute || !currentContext){
+    throw new Error('Primero calculá la ruta.');
+  }
+
+  const routeKm=num(currentRoute.round_trip?.distance_km);
+  const travelMinutes=num(currentRoute.round_trip?.duration_minutes);
+
+  let laborMinutes=0;
+
+  if(currentContext.mode==='service'){
+    laborMinutes=serviceLaborMinutes();
+  }else{
+    laborMinutes=num($('estimatedMinutes').value);
+    if(laborMinutes<=0){
+      throw new Error('Ingresá el Tiempo estimado de trabajo.');
+    }
+  }
+
+  const tollCount=num($('tolls').value);
+  const items=$('parts').value==='si' ? getItems() : [];
+
+  if($('parts').value==='si' && items.length===0){
+    throw new Error('Cargá al menos un accesorio o repuesto, o seleccioná No.');
+  }
+
+  const kmCost=routeKm*num(cfg.km);
+  const travelCost=(travelMinutes/60)*num(cfg.travel);
+  const laborCost=(laborMinutes/60)*num(cfg.labor);
+  const tollCost=tollCount*num(cfg.toll);
+  const partsCost=items.reduce((sum,item)=>sum+(num(item.qty)*num(item.price)),0);
+
+  const cash=kmCost+travelCost+laborCost+tollCost+partsCost;
+  const massive=cash*(1+(num(cfg.massive)/100));
+
+  return {
+    routeKm,
+    travelMinutes,
+    laborMinutes,
+    totalMinutes:travelMinutes+laborMinutes,
+    tollCount,
+    items,
+    kmCost,
+    travelCost,
+    laborCost,
+    tollCost,
+    partsCost,
+    cash,
+    massive
+  };
+}
+
+function renderCommercialPreview(calc){
+  $('previewLocation').textContent=
+    currentContext.mode==='quote'
+      ? currentContext.customerAddress
+      : 'Ubicación GPS registrada al iniciar';
+
+  $('previewTime').textContent=minutesText(calc.totalMinutes);
+  $('previewCash').textContent=money(calc.cash);
+  $('previewMassive').textContent=money(calc.massive);
+
+  const itemsBox=$('previewItems');
+  itemsBox.innerHTML='';
+
+  if(calc.items.length){
+    const title=document.createElement('div');
+    title.style.fontWeight='700';
+    title.style.marginBottom='6px';
+    title.textContent='Accesorios / repuestos';
+    itemsBox.appendChild(title);
+
+    calc.items.forEach(item=>{
+      const row=document.createElement('div');
+      row.className='previewLine';
+
+      const left=document.createElement('span');
+      left.textContent=item.qty+' × '+(item.desc || 'Ítem');
+
+      const right=document.createElement('b');
+      right.textContent=money(num(item.qty)*num(item.price));
+
+      row.appendChild(left);
+      row.appendChild(right);
+      itemsBox.appendChild(row);
+    });
+
+    itemsBox.classList.remove('hidden');
+  }else{
+    itemsBox.classList.add('hidden');
+  }
+
+  $('preview').classList.remove('hidden');
+}
+
 function showRoute(route){
   currentRoute=route;
   $('routeKm').textContent=route.round_trip.distance_km.toFixed(1)+' km';
@@ -388,6 +592,9 @@ function render(){
 }
 
 $('startService').onclick=()=>{
+  currentRoute=null;
+  currentContext=null;
+  $('preview').classList.add('hidden');
   $('geoInfo').classList.remove('hidden');
   $('geoInfo').textContent='Obteniendo ubicación…';
 
@@ -461,6 +668,9 @@ $('continueService').onclick=async()=>{
     );
 
     box.textContent='Ruta calculada correctamente.';
+    currentContext={
+      mode:'service'
+    };
     showRoute(route);
   }catch(e){
     box.textContent='No se pudo calcular: '+(e.message||String(e));
@@ -479,6 +689,9 @@ $('newService').onclick=()=>{
 
 
 $('address').addEventListener('input',()=>{
+  currentRoute=null;
+  currentContext=null;
+  $('preview').classList.add('hidden');
   selectedCustomerPlaceId=null;
   $('addressConfirmed').classList.add('hidden');
   $('addressInfo').classList.add('hidden');
@@ -556,6 +769,11 @@ $('quoteAddress').onclick=async()=>{
     );
 
     box.textContent='Ruta calculada correctamente.';
+    currentContext={
+      mode:'quote',
+      customerAddress:customerAddress,
+      customerPlaceId:selectedCustomerPlaceId
+    };
     showRoute(route);
   }catch(e){
     box.textContent='No se pudo calcular: '+(e.message||String(e));
@@ -636,16 +854,17 @@ $('parts').onchange=()=>{
 $('addItemBtn').onclick=()=>addItem();
 
 $('previewBtn').onclick=()=>{
-  const items=$('parts').value==='si' ? getItems() : [];
-  $('preview').classList.remove('hidden');
+  const errorBox=$('previewError');
 
-  if(items.length){
-    $('preview').textContent=
-      'Accesorios/repuestos cargados: '+items.length+
-      '. La estructura está lista. Falta conectar Google Routes y la base para obtener el importe real.';
-  }else{
-    $('preview').textContent=
-      'La estructura está lista. Falta conectar Google Routes y la base para obtener el importe real.';
+  errorBox.classList.add('hidden');
+  $('preview').classList.add('hidden');
+
+  try{
+    const calc=calculateAmounts();
+    renderCommercialPreview(calc);
+  }catch(e){
+    errorBox.textContent=e.message||String(e);
+    errorBox.classList.remove('hidden');
   }
 };
 
