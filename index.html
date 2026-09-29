@@ -264,6 +264,10 @@
 
       <button class="verde hidden" id="issueBtn" style="margin-top:14px">EMITIR</button>
       <div id="issueStatus" class="status info hidden"></div>
+      <div id="pdfActions" class="hidden" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
+        <button class="claro" id="openPdfBtn" type="button">ABRIR PDF</button>
+        <button class="azul" id="sharePdfBtn" type="button">COMPARTIR PDF</button>
+      </div>
     </div>
 
   </section>
@@ -271,6 +275,8 @@
   <div class="footerNote">piOca® · uso interno</div>
 </main>
 
+<script src="https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js"></script>
+<script src="r17-pdf.js"></script>
 <script>
 const SERVICE_KEY='r17_active_v1';
 const CFG_KEY='r17_cfg_v1';
@@ -280,6 +286,7 @@ const SUPABASE_PUBLISHABLE='sb_publishable_htgEX8HiRGAjpCVhPw1gfg_tOPxkJoI';
 let currentRoute=null;
 let currentContext=null;
 let lastPreviewCalc=null;
+let lastIssuedRecord=null;
 let selectedCustomerPlaceId=null;
 let autocompleteTimer=null;
 let autocompleteSeq=0;
@@ -496,8 +503,9 @@ function calculateAmounts(){
   const partsCost=items.reduce((sum,item)=>sum+(num(item.qty)*num(item.price)),0);
 
   const visitLaborRaw=kmCost+travelCost+laborCost+tollCost;
+  const visitLaborRounded=round500(visitLaborRaw);
   const totalCashRaw=visitLaborRaw+partsCost;
-  const cashRounded=round500(totalCashRaw);
+  const cashRounded=visitLaborRounded+partsCost;
 
   const ivaPercent=(cfg.iva===undefined || String(cfg.iva).trim()==='') ? 21 : num(cfg.iva);
   const ivaAmount=cashRounded*(ivaPercent/100);
@@ -515,6 +523,7 @@ function calculateAmounts(){
     tollCost,
     partsCost,
     visitLaborRaw,
+    visitLaborRounded,
     totalCashRaw,
     cashRounded,
     ivaPercent,
@@ -976,7 +985,7 @@ function issuedPayload(calc){
     total_invoice:calc.ivaIncluded,
 
     pdf_version:'r17-pdf-v1',
-    pdf_name:null,
+    pdf_name:'piOca_Resumen_Servicio.pdf',
 
     snapshot:{
       base_address:String(cfg.base||''),
@@ -996,6 +1005,7 @@ function issuedPayload(calc){
       items:calc.items,
       prices:{
         visit_labor_raw:calc.visitLaborRaw,
+        visit_labor_rounded:calc.visitLaborRounded,
         parts:calc.partsCost,
         total_cash_raw:calc.totalCashRaw,
         total_cash_rounded:calc.cashRounded,
@@ -1053,17 +1063,45 @@ $('issueBtn').onclick=async()=>{
     const payload=issuedPayload(calc);
     const result=await issueToHistory(payload);
 
-    localStorage.setItem('r17_last_issued_v1',JSON.stringify({
+    lastIssuedRecord={
+      ...payload,
       id:result.id,
-      created_at:result.created_at,
-      payload
-    }));
+      created_at:result.created_at
+    };
 
-    status.textContent='Emitido correctamente y guardado en Historial.';
+    localStorage.setItem('r17_last_issued_v1',JSON.stringify(lastIssuedRecord));
+
+    // Generamos el PDF al emitir. Los botones lo abren o comparten.
+    await PiocaPDF.build(lastIssuedRecord);
+
+    status.textContent='Emitido correctamente, guardado en Historial y PDF generado.';
     $('issueBtn').textContent='EMITIDO';
+    $('pdfActions').classList.remove('hidden');
   }catch(e){
     status.textContent='No se pudo emitir: '+(e.message||String(e));
     $('issueBtn').disabled=false;
+  }
+};
+
+
+$('openPdfBtn').onclick=async()=>{
+  if(!lastIssuedRecord) return;
+  try{
+    await PiocaPDF.openPdf(lastIssuedRecord);
+  }catch(e){
+    $('issueStatus').classList.remove('hidden');
+    $('issueStatus').textContent='No se pudo abrir el PDF: '+(e.message||String(e));
+  }
+};
+
+$('sharePdfBtn').onclick=async()=>{
+  if(!lastIssuedRecord) return;
+  try{
+    await PiocaPDF.sharePdf(lastIssuedRecord);
+  }catch(e){
+    if(e && e.name==='AbortError') return;
+    $('issueStatus').classList.remove('hidden');
+    $('issueStatus').textContent='No se pudo compartir el PDF: '+(e.message||String(e));
   }
 };
 
@@ -1076,6 +1114,8 @@ $('previewBtn').onclick=()=>{
   $('issueBtn').disabled=false;
   $('issueBtn').textContent='EMITIR';
   $('issueStatus').classList.add('hidden');
+  $('pdfActions').classList.add('hidden');
+  lastIssuedRecord=null;
 
   try{
     const calc=calculateAmounts();
