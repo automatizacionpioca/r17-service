@@ -5,16 +5,136 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Historial</title>
 <link rel="stylesheet" href="styles.css">
+<style>
+.historyToolbar{
+  display:flex;
+  gap:10px;
+  align-items:center;
+  justify-content:space-between;
+  margin-bottom:14px;
+}
+.historyToolbar p{margin:0}
+.refreshBtn{
+  border:1px solid #d7e0ea;
+  background:#fff;
+  color:#1f3348;
+  border-radius:12px;
+  padding:10px 14px;
+  font-weight:700;
+  cursor:pointer;
+}
+.historyList{
+  display:grid;
+  gap:14px;
+}
+.opCard{
+  border:1px solid #dbe3ec;
+  border-radius:18px;
+  background:#fff;
+  overflow:hidden;
+  box-shadow:0 8px 22px rgba(20,55,90,.05);
+}
+.opHead{
+  padding:16px;
+  background:#f7f9fc;
+  border-bottom:1px solid #e5eaf0;
+}
+.opDate{
+  font-size:12px;
+  color:#7a8797;
+  margin-bottom:5px;
+}
+.opAddress{
+  font-size:18px;
+  line-height:1.25;
+  font-weight:800;
+  color:#243448;
+}
+.opType{
+  display:inline-block;
+  margin-top:8px;
+  padding:5px 9px;
+  border-radius:999px;
+  font-size:11px;
+  font-weight:800;
+  color:#1d5aa6;
+  background:#eaf3ff;
+}
+.opBody{
+  padding:14px 16px 16px;
+}
+.opRow{
+  display:flex;
+  justify-content:space-between;
+  gap:14px;
+  padding:8px 0;
+  border-bottom:1px solid #edf1f5;
+}
+.opRow:last-child{border-bottom:0}
+.opRow span{color:#718093}
+.opRow b{
+  color:#26384c;
+  text-align:right;
+}
+.opTotal b{
+  color:#0d5db0;
+  font-size:18px;
+}
+.detailBtn{
+  width:100%;
+  margin-top:12px;
+  border:1px solid #cfd9e5;
+  background:#fff;
+  color:#243448;
+  border-radius:12px;
+  padding:11px 14px;
+  font-weight:800;
+  cursor:pointer;
+}
+.internal{
+  margin-top:12px;
+  padding:12px;
+  border-radius:12px;
+  background:#f6f8fb;
+  border:1px solid #e0e6ed;
+}
+.internalTitle{
+  font-weight:800;
+  color:#47586b;
+  margin-bottom:6px;
+}
+.internal .opRow{
+  font-size:13px;
+}
+.errorBox{
+  background:#fff1f1;
+  color:#a42b2b;
+  border:1px solid #f0caca;
+  border-radius:14px;
+  padding:14px;
+}
+.loadingBox,
+.emptyBox{
+  background:#f7f9fc;
+  color:#68788b;
+  border:1px solid #dfe6ee;
+  border-radius:14px;
+  padding:18px;
+  text-align:center;
+}
+</style>
 </head>
 <body>
 <main class="shell">
   <header class="head">
     <div class="brandMark" style="background:transparent;box-shadow:none;border-radius:0;">
-      <img src="https://automatizacionpioca.github.io/pioca-gps/logo-pioca.png" alt="piOca®" style="width:100%;height:auto;display:block;">
+      <img src="https://automatizacionpioca.github.io/pioca-gps/logo-pioca.png"
+           alt="piOca®"
+           style="width:100%;height:auto;display:block;">
     </div>
     <div>
       <h1>Historial</h1>
-      <p>Operaciones emitidas y documentos generados.</p>
+      <p>Operaciones emitidas y detalle interno.</p>
     </div>
   </header>
 
@@ -26,13 +146,211 @@
 
   <section class="body">
     <div class="card">
-      <h2>Operaciones emitidas</h2>
-      <p>Más adelante cada emisión quedará guardada con su detalle interno y su PDF.</p>
-      <div class="listEmpty">Todavía no hay operaciones emitidas.</div>
+      <div class="historyToolbar">
+        <div>
+          <h2 style="margin-bottom:4px">Operaciones emitidas</h2>
+          <p>Las más recientes aparecen primero.</p>
+        </div>
+        <button id="refreshBtn" class="refreshBtn" type="button">Actualizar</button>
+      </div>
+
+      <div id="historyList" class="historyList">
+        <div class="loadingBox">Cargando historial…</div>
+      </div>
     </div>
   </section>
 
   <div class="footerNote">piOca® · uso interno</div>
 </main>
+
+<script>
+const HISTORY_URL='https://apxrmkdegjnblkbyjsbp.supabase.co/functions/v1/r17-history';
+const SUPABASE_PUBLISHABLE='sb_publishable_htgEX8HiRGAjpCVhPw1gfg_tOPxkJoI';
+
+function money(v){
+  return new Intl.NumberFormat('es-AR',{
+    style:'currency',
+    currency:'ARS',
+    maximumFractionDigits:0
+  }).format(Number(v)||0);
+}
+
+function minutesText(value){
+  const min=Math.max(0,Math.round(Number(value)||0));
+  const h=Math.floor(min/60);
+  const m=min%60;
+  if(h && m) return h+' h '+m+' min';
+  if(h) return h+' h';
+  return m+' min';
+}
+
+function dateText(iso){
+  if(!iso) return '—';
+  const d=new Date(iso);
+  return new Intl.DateTimeFormat('es-AR',{
+    day:'2-digit',
+    month:'2-digit',
+    year:'numeric',
+    hour:'2-digit',
+    minute:'2-digit'
+  }).format(d);
+}
+
+function escapeHtml(value){
+  return String(value??'')
+    .replaceAll('&','&amp;')
+    .replaceAll('<','&lt;')
+    .replaceAll('>','&gt;')
+    .replaceAll('"','&quot;')
+    .replaceAll("'","&#039;");
+}
+
+async function fetchHistory(){
+  const response=await fetch(HISTORY_URL,{
+    method:'GET',
+    headers:{
+      'apikey':SUPABASE_PUBLISHABLE,
+      'Authorization':'Bearer '+SUPABASE_PUBLISHABLE
+    }
+  });
+
+  let data=null;
+  try{
+    data=await response.json();
+  }catch(e){
+    throw new Error('La función de Historial respondió con un formato inválido.');
+  }
+
+  if(!response.ok || !data.ok){
+    const detail=data && data.detail ? ' · '+data.detail : '';
+    throw new Error((data && data.error ? data.error : 'No se pudo cargar el historial')+detail);
+  }
+
+  return Array.isArray(data.items) ? data.items : [];
+}
+
+function totalEmployed(item){
+  const snap=item.snapshot || {};
+  if(snap.total_employed_minutes!==undefined){
+    return Number(snap.total_employed_minutes)||0;
+  }
+  return (Number(item.round_trip_minutes)||0)+(Number(item.labor_minutes)||0);
+}
+
+function itemsSummary(item){
+  const items=Array.isArray(item.items) ? item.items : [];
+  if(!items.length) return 'Sin accesorios / repuestos';
+  return items.map(x=>{
+    const qty=Number(x.qty)||0;
+    const desc=x.desc || 'Ítem';
+    return qty+' × '+desc;
+  }).join(' · ');
+}
+
+function internalDetail(item){
+  const snap=item.snapshot || {};
+  const rates=snap.rates || {};
+  const prices=snap.prices || {};
+
+  return `
+    <div class="internal hidden" id="internal-${escapeHtml(item.id)}">
+      <div class="internalTitle">Detalle interno</div>
+      <div class="opRow"><span>Distancia ida</span><b>${(Number(item.one_way_km)||0).toFixed(1)} km</b></div>
+      <div class="opRow"><span>Distancia ida y vuelta</span><b>${(Number(item.round_trip_km)||0).toFixed(1)} km</b></div>
+      <div class="opRow"><span>Traslado ida y vuelta</span><b>${minutesText(item.round_trip_minutes)}</b></div>
+      <div class="opRow"><span>Trabajo</span><b>${minutesText(item.labor_minutes)}</b></div>
+      <div class="opRow"><span>Peajes</span><b>${Number(item.toll_count)||0}</b></div>
+      <div class="opRow"><span>Valor/km usado</span><b>${money(rates.km)}</b></div>
+      <div class="opRow"><span>Hora traslado usada</span><b>${money(rates.travel_hour)}</b></div>
+      <div class="opRow"><span>Hora mano de obra usada</span><b>${money(rates.labor_hour)}</b></div>
+      <div class="opRow"><span>Valor peaje usado</span><b>${money(rates.toll)}</b></div>
+      <div class="opRow"><span>Total previo a redondeo</span><b>${money(prices.total_cash_raw)}</b></div>
+    </div>
+  `;
+}
+
+function cardHtml(item){
+  const type=item.mode==='service' ? 'Servicio en domicilio' : 'Cotización anticipada';
+  const address=item.customer_address || 'Sin ubicación';
+  const employed=totalEmployed(item);
+  const cash=Number(item.total_cash_rounded)||0;
+  const invoice=Number(item.total_invoice)||0;
+
+  return `
+    <article class="opCard">
+      <div class="opHead">
+        <div class="opDate">${dateText(item.created_at)}</div>
+        <div class="opAddress">${escapeHtml(address)}</div>
+        <div class="opType">${type}</div>
+      </div>
+
+      <div class="opBody">
+        <div class="opRow">
+          <span>Distancia informada</span>
+          <b>${(Number(item.one_way_km)||0).toFixed(1)} km</b>
+        </div>
+
+        <div class="opRow">
+          <span>Tiempo empleado</span>
+          <b>${minutesText(employed)}</b>
+        </div>
+
+        <div class="opRow">
+          <span>Accesorios / repuestos</span>
+          <b>${escapeHtml(itemsSummary(item))}</b>
+        </div>
+
+        <div class="opRow opTotal">
+          <span>Precio efectivo</span>
+          <b>${money(cash)}</b>
+        </div>
+
+        <div class="opRow opTotal">
+          <span>Final IVA incluido</span>
+          <b>${money(invoice)}</b>
+        </div>
+
+        <button class="detailBtn" type="button"
+          onclick="toggleInternal('${escapeHtml(item.id)}',this)">
+          Ver detalle interno
+        </button>
+
+        ${internalDetail(item)}
+      </div>
+    </article>
+  `;
+}
+
+function toggleInternal(id,btn){
+  const box=document.getElementById('internal-'+id);
+  if(!box) return;
+  const hidden=box.classList.toggle('hidden');
+  btn.textContent=hidden ? 'Ver detalle interno' : 'Ocultar detalle interno';
+}
+
+async function loadHistory(){
+  const list=document.getElementById('historyList');
+  list.innerHTML='<div class="loadingBox">Cargando historial…</div>';
+  document.getElementById('refreshBtn').disabled=true;
+
+  try{
+    const items=await fetchHistory();
+
+    if(!items.length){
+      list.innerHTML='<div class="emptyBox">Todavía no hay operaciones emitidas.</div>';
+      return;
+    }
+
+    list.innerHTML=items.map(cardHtml).join('');
+  }catch(e){
+    list.innerHTML='<div class="errorBox">'+escapeHtml(e.message||String(e))+'</div>';
+  }finally{
+    document.getElementById('refreshBtn').disabled=false;
+  }
+}
+
+document.getElementById('refreshBtn').onclick=loadHistory;
+loadHistory();
+</script>
 </body>
 </html>
