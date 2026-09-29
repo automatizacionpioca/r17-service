@@ -451,9 +451,13 @@ $('continueService').onclick=async()=>{
   $('continueService').disabled=true;
 
   try{
+    const baseDestination = cfg.basePlaceId
+      ? {placeId:String(cfg.basePlaceId)}
+      : {address:String(cfg.base).trim()};
+
     const route=await calculateRoute(
       {lat:Number(st.lat),lng:Number(st.lng)},
-      {address:String(cfg.base).trim()}
+      baseDestination
     );
 
     box.textContent='Ruta calculada correctamente.';
@@ -542,8 +546,12 @@ $('quoteAddress').onclick=async()=>{
   $('quoteAddress').disabled=true;
 
   try{
+    const baseOrigin = cfg.basePlaceId
+      ? {placeId:String(cfg.basePlaceId)}
+      : {address:String(cfg.base).trim()};
+
     const route=await calculateRoute(
-      {address:String(cfg.base).trim()},
+      baseOrigin,
       {placeId:selectedCustomerPlaceId}
     );
 
