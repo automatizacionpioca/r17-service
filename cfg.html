@@ -115,8 +115,8 @@
       <label for="toll">Valor promedio de peaje</label>
       <input id="toll" type="number" min="0" step="0.01" inputmode="decimal" placeholder="$">
 
-      <label for="massive">Recargo Masiva (%)</label>
-      <input id="massive" type="number" min="0" step="0.01" inputmode="decimal" value="9">
+      <label for="iva">IVA (%)</label>
+      <input id="iva" type="number" min="0" step="0.01" inputmode="decimal" value="21">
 
       <button class="verde" id="save">GUARDAR CONFIGURACIÓN</button>
       <div class="status ok hidden" id="saved">Configuración guardada.</div>
@@ -128,7 +128,7 @@
 </main>
 
 <script>
-const ids=['base','km','travel','labor','toll','massive'];
+const ids=['base','km','travel','labor','toll','iva'];
 const key='r17_cfg_v1';
 
 const ROUTER_URL='https://apxrmkdegjnblkbyjsbp.supabase.co/functions/v1/r17-router';
@@ -269,6 +269,10 @@ function load(){
     ids.forEach(id=>{
       if(v[id]!==undefined) $(id).value=v[id];
     });
+
+    if(v.iva===undefined || String(v.iva).trim()===''){
+      $('iva').value='21';
+    }
 
     if(v.basePlaceId){
       selectedBasePlaceId=v.basePlaceId;
