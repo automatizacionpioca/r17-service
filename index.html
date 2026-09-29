@@ -91,6 +91,26 @@
   padding-top:8px;
   border-top:1px solid #e6ebf1;
 }
+.invoiceBox{
+  margin-top:14px;
+  padding:12px 14px;
+  border:1px solid #cfd9e6;
+  border-radius:14px;
+  background:#fff;
+}
+.invoiceBox .previewLine{
+  padding:9px 0;
+}
+.invoiceBase{
+  color:#233143;
+}
+.invoiceBase small{
+  display:block;
+  margin-top:3px;
+  color:#7a8797;
+  font-weight:600;
+  font-size:12px;
+}
 </style>
 </head>
 <body>
@@ -225,13 +245,20 @@
         <div id="previewItems" class="previewItems hidden"></div>
 
         <div class="previewLine">
-          <span>Total efectivo</span>
+          <span>Precio efectivo</span>
           <b class="previewTotal" id="previewCash">—</b>
         </div>
 
-        <div class="previewLine">
-          <span>Total Masiva</span>
-          <b class="previewTotal" id="previewMassive">—</b>
+        <div class="invoiceBox">
+          <div class="previewLine">
+            <span>Precio + IVA<br><small>(transferencia facturado)</small></span>
+            <b class="invoiceBase" id="previewPlusIva">—</b>
+          </div>
+
+          <div class="previewLine">
+            <span>Precio final IVA incluido</span>
+            <b class="previewTotal" id="previewIvaIncluded">—</b>
+          </div>
         </div>
       </div>
     </div>
@@ -414,7 +441,6 @@ function configReady(cfg){
     num(cfg.travel)>=0 &&
     num(cfg.labor)>=0 &&
     num(cfg.toll)>=0 &&
-    num(cfg.massive)>=0 &&
     String(cfg.km??'').trim()!=='' &&
     String(cfg.travel??'').trim()!=='' &&
     String(cfg.labor??'').trim()!=='' &&
@@ -461,7 +487,9 @@ function calculateAmounts(){
   const partsCost=items.reduce((sum,item)=>sum+(num(item.qty)*num(item.price)),0);
 
   const cash=kmCost+travelCost+laborCost+tollCost+partsCost;
-  const massive=cash*(1+(num(cfg.massive)/100));
+  const ivaPercent=(cfg.iva===undefined || String(cfg.iva).trim()==='') ? 21 : num(cfg.iva);
+  const ivaAmount=cash*(ivaPercent/100);
+  const ivaIncluded=cash+ivaAmount;
 
   return {
     routeKm,
@@ -476,7 +504,9 @@ function calculateAmounts(){
     tollCost,
     partsCost,
     cash,
-    massive
+    ivaPercent,
+    ivaAmount,
+    ivaIncluded
   };
 }
 
@@ -488,7 +518,8 @@ function renderCommercialPreview(calc){
 
   $('previewTime').textContent=minutesText(calc.totalMinutes);
   $('previewCash').textContent=money(calc.cash);
-  $('previewMassive').textContent=money(calc.massive);
+  $('previewPlusIva').textContent=money(calc.cash)+' + IVA';
+  $('previewIvaIncluded').textContent=money(calc.ivaIncluded);
 
   const itemsBox=$('previewItems');
   itemsBox.innerHTML='';
