@@ -9,9 +9,7 @@
 <body>
 <main class="shell">
   <header class="head">
-    <div class="brandMark" style="background:transparent;box-shadow:none;border-radius:0;">
-      <img src="https://automatizacionpioca.github.io/pioca-gps/logo-pioca.png" alt="piOca®" style="width:100%;height:auto;display:block;">
-    </div>
+    <div class="brandMark">piOca®</div>
     <div>
       <h1>Servicio técnico</h1>
       <p>Cálculo interno de intervención y emisión.</p>
@@ -93,14 +91,13 @@
       </select>
 
       <div id="partsBox" class="hidden">
-        <label for="qty">Cantidad</label>
-        <input id="qty" type="number" min="1" value="1">
+        <div id="itemsContainer"></div>
 
-        <label for="desc">Descripción</label>
-        <input id="desc" placeholder="Ej.: Control remoto">
+        <button type="button" class="claro" id="addItemBtn">+ AGREGAR OTRO ACCESORIO / REPUESTO</button>
 
-        <label for="price">Precio unitario sin IVA</label>
-        <input id="price" type="number" min="0" step="0.01" inputmode="decimal" placeholder="$">
+        <div class="muted" style="margin-top:8px">
+          Si cargás un solo ítem, se toma únicamente ese. Podés agregar todos los que necesites.
+        </div>
       </div>
 
       <button class="azul" id="previewBtn">VISTA PREVIA</button>
@@ -239,12 +236,89 @@ $('quoteAddress').onclick=()=>{
   $('calcCard').scrollIntoView({behavior:'smooth',block:'start'});
 };
 
+let itemSeq=0;
+
+function addItem(values={}){
+  itemSeq++;
+  const wrap=document.createElement('div');
+  wrap.className='card';
+  wrap.style.marginTop='12px';
+  wrap.style.padding='14px';
+  wrap.dataset.itemId=String(itemSeq);
+
+  wrap.innerHTML=`
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+      <strong style="color:#0d56a3">Ítem ${itemSeq}</strong>
+      <button type="button" class="claro removeItemBtn"
+        style="width:auto;margin:0;padding:8px 11px;font-size:12px">
+        ELIMINAR
+      </button>
+    </div>
+
+    <label>Cantidad</label>
+    <input class="itemQty" type="number" min="1" value="${values.qty||1}">
+
+    <label>Descripción</label>
+    <input class="itemDesc" placeholder="Ej.: Control remoto" value="${values.desc||''}">
+
+    <label>Precio unitario sin IVA</label>
+    <input class="itemPrice" type="number" min="0" step="0.01" inputmode="decimal"
+      placeholder="$" value="${values.price||''}">
+  `;
+
+  wrap.querySelector('.removeItemBtn').onclick=()=>{
+    wrap.remove();
+    renumberItems();
+    if(document.querySelectorAll('#itemsContainer > .card').length===0){
+      addItem();
+    }
+  };
+
+  $('itemsContainer').appendChild(wrap);
+  renumberItems();
+}
+
+function renumberItems(){
+  [...document.querySelectorAll('#itemsContainer > .card')].forEach((el,i)=>{
+    const title=el.querySelector('strong');
+    if(title) title.textContent='Ítem '+(i+1);
+  });
+}
+
+function ensureFirstItem(){
+  if(document.querySelectorAll('#itemsContainer > .card').length===0){
+    addItem();
+  }
+}
+
+function getItems(){
+  return [...document.querySelectorAll('#itemsContainer > .card')].map(el=>({
+    qty:Number(el.querySelector('.itemQty').value||0),
+    desc:el.querySelector('.itemDesc').value.trim(),
+    price:Number(el.querySelector('.itemPrice').value||0)
+  })).filter(x=>x.qty>0 && (x.desc || x.price>0));
+}
+
 $('parts').onchange=()=>{
-  $('partsBox').classList.toggle('hidden',$('parts').value!=='si');
+  const yes=$('parts').value==='si';
+  $('partsBox').classList.toggle('hidden',!yes);
+  if(yes) ensureFirstItem();
 };
 
+$('addItemBtn').onclick=()=>addItem();
+
 $('previewBtn').onclick=()=>{
+  const items=$('parts').value==='si' ? getItems() : [];
   $('preview').classList.remove('hidden');
+
+  if(items.length){
+    $('preview').textContent=
+      'Accesorios/repuestos cargados: '+items.length+
+      '. La estructura está lista. Falta conectar Google Routes y la base para obtener el importe real.';
+  }else{
+    $('preview').textContent=
+      'La estructura está lista. Falta conectar Google Routes y la base para obtener el importe real.';
+  }
 };
 
 render();
