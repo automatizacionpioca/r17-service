@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>piOca® Servicio</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<main class="shell">
+  <header class="head">
+    <div class="brandMark" style="background:transparent;box-shadow:none;border-radius:0;">
+      <img src="https://automatizacionpioca.github.io/pioca-gps/logo-pioca.png" alt="piOca®" style="width:100%;height:auto;display:block;">
+    </div>
+    <div>
+      <h1>Servicio técnico</h1>
+      <p>Cálculo interno de intervención y emisión.</p>
+    </div>
+  </header>
+
+  <nav class="nav">
+    <a class="activo" href="index.html">Nuevo</a>
+    <a href="log.html">Historial</a>
+    <a href="cfg.html">Configuración</a>
+  </nav>
+
+  <section class="body">
+
+    <div class="card" id="serviceCard">
+      <h2>Servicio en domicilio</h2>
+      <p>Usalo cuando llegás al cliente. Guarda ubicación y mide automáticamente el tiempo de trabajo.</p>
+
+      <div id="idleBox">
+        <button class="verde" id="startService">INICIAR SERVICIO</button>
+        <div class="status info hidden" id="geoInfo"></div>
+      </div>
+
+      <div id="runningBox" class="hidden">
+        <div class="status ok">Servicio en curso</div>
+        <div class="timer" id="timer">00:00:00</div>
+        <div class="muted" id="startedAt" style="text-align:center"></div>
+        <button class="rojo" id="finishService">FINALIZAR SERVICIO</button>
+      </div>
+
+      <div id="finishedBox" class="hidden">
+        <div class="status ok">Servicio finalizado correctamente.</div>
+        <div class="kpi">
+          <span>Tiempo de mano de obra registrado</span>
+          <b id="workedTime">—</b>
+        </div>
+        <div class="kpi">
+          <span>Ubicación guardada al iniciar</span>
+          <b id="savedLocation" style="font-size:14px">—</b>
+        </div>
+        <button class="azul" id="continueService">CONTINUAR CÁLCULO</button>
+        <button class="claro" id="newService">DESCARTAR Y NUEVO SERVICIO</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Cotización anticipada</h2>
+      <p>Para calcular un service desde casa antes de ir al domicilio.</p>
+
+      <label for="address">Dirección del cliente</label>
+      <input id="address" autocomplete="street-address" placeholder="Ej.: Av. Maipú 2300, Olivos">
+
+      <label for="estimatedMinutes">Tiempo estimado de trabajo</label>
+      <input id="estimatedMinutes" type="number" min="0" inputmode="numeric" placeholder="Minutos">
+
+      <button class="oscuro" id="quoteAddress">CALCULAR POR DIRECCIÓN</button>
+      <div class="status info hidden" id="addressInfo">
+        En la próxima etapa este campo se conectará con Google para obtener distancia y tiempo de traslado.
+      </div>
+    </div>
+
+    <div class="card hidden" id="calcCard">
+      <h2>Datos para calcular</h2>
+      <p>Los valores económicos se toman de Configuración y nunca se muestran al cliente.</p>
+
+      <label for="tolls">Cantidad de peajes</label>
+      <select id="tolls">
+        <option value="0">0</option>
+        <option value="1">1</option>
+        <option value="2">2</option>
+        <option value="3">3</option>
+        <option value="4">4</option>
+      </select>
+
+      <label for="parts">¿Hubo accesorios o repuestos?</label>
+      <select id="parts">
+        <option value="no">No</option>
+        <option value="si">Sí</option>
+      </select>
+
+      <div id="partsBox" class="hidden">
+        <label for="qty">Cantidad</label>
+        <input id="qty" type="number" min="1" value="1">
+
+        <label for="desc">Descripción</label>
+        <input id="desc" placeholder="Ej.: Control remoto">
+
+        <label for="price">Precio unitario sin IVA</label>
+        <input id="price" type="number" min="0" step="0.01" inputmode="decimal" placeholder="$">
+      </div>
+
+      <button class="azul" id="previewBtn">VISTA PREVIA</button>
+      <div id="preview" class="status warn hidden">
+        La estructura está lista. Falta conectar Google Routes y la base para obtener el importe real.
+      </div>
+    </div>
+
+  </section>
+
+  <div class="footerNote">piOca® · uso interno</div>
+</main>
+
+<script>
+const SERVICE_KEY='r17_active_v1';
+
+const $=id=>document.getElementById(id);
+
+let timerInt=null;
+
+function fmtElapsed(ms){
+  const s=Math.max(0,Math.floor(ms/1000));
+  const h=String(Math.floor(s/3600)).padStart(2,'0');
+  const m=String(Math.floor((s%3600)/60)).padStart(2,'0');
+  const sec=String(s%60).padStart(2,'0');
+  return h+':'+m+':'+sec;
+}
+function humanMinutes(ms){
+  const min=Math.max(0,Math.round(ms/60000));
+  const h=Math.floor(min/60);
+  const m=min%60;
+  if(h && m) return h+' h '+m+' min';
+  if(h) return h+' h';
+  return m+' min';
+}
+function readState(){
+  try{return JSON.parse(localStorage.getItem(SERVICE_KEY)||'null')}catch(e){return null}
+}
+function writeState(v){
+  localStorage.setItem(SERVICE_KEY,JSON.stringify(v));
+}
+function clearState(){
+  localStorage.removeItem(SERVICE_KEY);
+}
+function showIdle(){
+  $('idleBox').classList.remove('hidden');
+  $('runningBox').classList.add('hidden');
+  $('finishedBox').classList.add('hidden');
+  if(timerInt) clearInterval(timerInt);
+}
+function showRunning(st){
+  $('idleBox').classList.add('hidden');
+  $('runningBox').classList.remove('hidden');
+  $('finishedBox').classList.add('hidden');
+  $('startedAt').textContent='Iniciado: '+new Date(st.startAt).toLocaleString('es-AR');
+  const tick=()=>$('timer').textContent=fmtElapsed(Date.now()-st.startAt);
+  tick();
+  if(timerInt) clearInterval(timerInt);
+  timerInt=setInterval(tick,1000);
+}
+function showFinished(st){
+  $('idleBox').classList.add('hidden');
+  $('runningBox').classList.add('hidden');
+  $('finishedBox').classList.remove('hidden');
+  if(timerInt) clearInterval(timerInt);
+  $('workedTime').textContent=humanMinutes(st.endAt-st.startAt);
+  $('savedLocation').textContent=
+    st.lat!=null ? st.lat.toFixed(5)+', '+st.lng.toFixed(5) : 'Ubicación no disponible';
+}
+function render(){
+  const st=readState();
+  if(!st){showIdle();return;}
+  if(st.status==='running') showRunning(st);
+  else if(st.status==='finished') showFinished(st);
+  else showIdle();
+}
+
+$('startService').onclick=()=>{
+  $('geoInfo').classList.remove('hidden');
+  $('geoInfo').textContent='Obteniendo ubicación…';
+
+  const start=(pos)=>{
+    const st={
+      status:'running',
+      startAt:Date.now(),
+      lat:pos?pos.coords.latitude:null,
+      lng:pos?pos.coords.longitude:null,
+      accuracy:pos?pos.coords.accuracy:null
+    };
+    writeState(st);
+    $('geoInfo').classList.add('hidden');
+    render();
+  };
+
+  if(!navigator.geolocation){
+    $('geoInfo').textContent='Este navegador no permite ubicación. Se iniciará sin GPS.';
+    setTimeout(()=>start(null),800);
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    p=>start(p),
+    e=>{
+      $('geoInfo').textContent='No se obtuvo GPS ('+e.message+'). Se iniciará sin ubicación.';
+      setTimeout(()=>start(null),1200);
+    },
+    {enableHighAccuracy:true,timeout:12000,maximumAge:15000}
+  );
+};
+
+$('finishService').onclick=()=>{
+  const st=readState();
+  if(!st || st.status!=='running') return;
+  st.status='finished';
+  st.endAt=Date.now();
+  writeState(st);
+  render();
+};
+
+$('continueService').onclick=()=>{
+  $('calcCard').classList.remove('hidden');
+  $('calcCard').scrollIntoView({behavior:'smooth',block:'start'});
+};
+
+$('newService').onclick=()=>{
+  if(confirm('¿Descartar este servicio y comenzar uno nuevo?')){
+    clearState();
+    $('calcCard').classList.add('hidden');
+    render();
+  }
+};
+
+$('quoteAddress').onclick=()=>{
+  $('addressInfo').classList.remove('hidden');
+  $('calcCard').classList.remove('hidden');
+  $('calcCard').scrollIntoView({behavior:'smooth',block:'start'});
+};
+
+$('parts').onchange=()=>{
+  $('partsBox').classList.toggle('hidden',$('parts').value!=='si');
+};
+
+$('previewBtn').onclick=()=>{
+  $('preview').classList.remove('hidden');
+};
+
+render();
+</script>
+</body>
+</html>
