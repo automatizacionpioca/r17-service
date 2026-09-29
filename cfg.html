@@ -5,6 +5,64 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Configuración</title>
 <link rel="stylesheet" href="styles.css">
+<style>
+.autocompleteWrap{position:relative}
+.addressSuggestions{
+  position:absolute;
+  left:0;right:0;top:100%;
+  z-index:50;
+  background:#fff;
+  border:1px solid #d8dde5;
+  border-radius:12px;
+  box-shadow:0 10px 28px rgba(0,0,0,.14);
+  overflow:hidden;
+  margin-top:6px;
+  max-height:290px;
+  overflow-y:auto;
+}
+.addressSuggestion{
+  width:100%;
+  display:block;
+  text-align:left;
+  background:#fff;
+  color:#1b2430;
+  border:0;
+  border-bottom:1px solid #edf0f4;
+  padding:12px 14px;
+  margin:0;
+  cursor:pointer;
+  font:inherit;
+}
+.addressSuggestion:last-child{border-bottom:0}
+.addressSuggestion:active{background:#f2f6fb}
+.addressSuggestion b{
+  display:block;
+  font-size:14px;
+  line-height:1.25;
+}
+.addressSuggestion span{
+  display:block;
+  margin-top:3px;
+  font-size:12px;
+  line-height:1.3;
+  color:#697386;
+}
+.addressSuggestion.info{
+  cursor:default;
+  color:#697386;
+  font-size:13px;
+}
+.addressConfirmed{
+  font-size:12px;
+  margin-top:7px;
+  color:#16803a;
+  font-weight:700;
+}
+.status.error{
+  background:#fff3f3;
+  color:#a12626;
+}
+</style>
 </head>
 <body>
 <main class="shell">
@@ -30,10 +88,14 @@
       <p>Dirección desde la que se calcula el recorrido ida y vuelta.</p>
 
       <label for="base">Dirección base / Casa</label>
-      <input id="base" placeholder="Dirección completa">
+      <div class="autocompleteWrap">
+        <input id="base" autocomplete="off" autocapitalize="words" placeholder="Dirección completa">
+        <div id="baseSuggestions" class="addressSuggestions hidden"></div>
+      </div>
+      <div id="baseConfirmed" class="addressConfirmed hidden">✓ Dirección base seleccionada de Google</div>
 
       <div class="muted" style="margin-top:8px">
-        Después Google validará esta dirección y la convertirá en un punto exacto.
+        Escribí la dirección y seleccioná una opción de Google.
       </div>
     </div>
 
@@ -58,6 +120,7 @@
 
       <button class="verde" id="save">GUARDAR CONFIGURACIÓN</button>
       <div class="status ok hidden" id="saved">Configuración guardada.</div>
+      <div class="status error hidden" id="saveError"></div>
     </div>
   </section>
 
@@ -68,22 +131,184 @@
 const ids=['base','km','travel','labor','toll','massive'];
 const key='r17_cfg_v1';
 
+const ROUTER_URL='https://apxrmkdegjnblkbyjsbp.supabase.co/functions/v1/r17-router';
+const SUPABASE_PUBLISHABLE='sb_publishable_htgEX8HiRGAjpCVhPw1gfg_tOPxkJoI';
+
+let selectedBasePlaceId=null;
+let autocompleteTimer=null;
+let autocompleteSeq=0;
+
+function $(id){
+  return document.getElementById(id);
+}
+
+async function requestAutocomplete(input){
+  const response=await fetch(ROUTER_URL,{
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'apikey':SUPABASE_PUBLISHABLE,
+      'Authorization':'Bearer '+SUPABASE_PUBLISHABLE
+    },
+    body:JSON.stringify({
+      action:'autocomplete',
+      input:String(input||'').trim()
+    })
+  });
+
+  let data=null;
+  try{
+    data=await response.json();
+  }catch(e){
+    throw new Error('La búsqueda de direcciones respondió con un formato inválido.');
+  }
+
+  if(!response.ok || !data.ok){
+    throw new Error((data && data.error) ? data.error : 'No se pudieron cargar las sugerencias.');
+  }
+
+  return Array.isArray(data.suggestions) ? data.suggestions : [];
+}
+
+function hideSuggestions(){
+  $('baseSuggestions').classList.add('hidden');
+}
+
+function showMessage(text){
+  const box=$('baseSuggestions');
+  box.innerHTML='';
+  const row=document.createElement('div');
+  row.className='addressSuggestion info';
+  row.textContent=text;
+  box.appendChild(row);
+  box.classList.remove('hidden');
+}
+
+function renderSuggestions(items){
+  const box=$('baseSuggestions');
+  box.innerHTML='';
+
+  if(!items.length){
+    showMessage('No se encontraron direcciones.');
+    return;
+  }
+
+  items.forEach(item=>{
+    const btn=document.createElement('button');
+    btn.type='button';
+    btn.className='addressSuggestion';
+
+    const main=document.createElement('b');
+    main.textContent=item.mainText || item.text || '';
+
+    const secondary=document.createElement('span');
+    secondary.textContent=item.secondaryText || '';
+
+    btn.appendChild(main);
+    if(secondary.textContent) btn.appendChild(secondary);
+
+    btn.onclick=()=>{
+      $('base').value=item.text || item.mainText || '';
+      selectedBasePlaceId=item.placeId || null;
+      $('baseConfirmed').classList.toggle('hidden',!selectedBasePlaceId);
+      $('saveError').classList.add('hidden');
+      hideSuggestions();
+    };
+
+    box.appendChild(btn);
+  });
+
+  box.classList.remove('hidden');
+}
+
+$('base').addEventListener('input',()=>{
+  selectedBasePlaceId=null;
+  $('baseConfirmed').classList.add('hidden');
+  $('saveError').classList.add('hidden');
+
+  const query=$('base').value.trim();
+
+  if(autocompleteTimer) clearTimeout(autocompleteTimer);
+
+  if(query.length<3){
+    hideSuggestions();
+    return;
+  }
+
+  const seq=++autocompleteSeq;
+
+  autocompleteTimer=setTimeout(async()=>{
+    showMessage('Buscando direcciones…');
+
+    try{
+      const items=await requestAutocomplete(query);
+      if(seq!==autocompleteSeq) return;
+      renderSuggestions(items);
+    }catch(e){
+      if(seq!==autocompleteSeq) return;
+      showMessage('No se pudieron cargar las sugerencias.');
+    }
+  },300);
+});
+
+$('base').addEventListener('focus',()=>{
+  if($('base').value.trim().length>=3 && !selectedBasePlaceId){
+    $('base').dispatchEvent(new Event('input'));
+  }
+});
+
+document.addEventListener('click',(e)=>{
+  const wrap=e.target.closest('.autocompleteWrap');
+  if(!wrap) hideSuggestions();
+});
+
 function load(){
   try{
     const v=JSON.parse(localStorage.getItem(key)||'{}');
+
     ids.forEach(id=>{
-      if(v[id]!==undefined) document.getElementById(id).value=v[id];
+      if(v[id]!==undefined) $(id).value=v[id];
     });
+
+    if(v.basePlaceId){
+      selectedBasePlaceId=v.basePlaceId;
+      $('baseConfirmed').classList.remove('hidden');
+    }
   }catch(e){}
 }
-document.getElementById('save').onclick=()=>{
+
+$('save').onclick=()=>{
+  const base=$('base').value.trim();
+
+  if(!base){
+    $('saveError').textContent='Ingresá la Dirección base / Casa.';
+    $('saveError').classList.remove('hidden');
+    return;
+  }
+
+  if(!selectedBasePlaceId){
+    $('saveError').textContent='Seleccioná la Dirección base / Casa desde las opciones de Google.';
+    $('saveError').classList.remove('hidden');
+    return;
+  }
+
   const data={};
-  ids.forEach(id=>data[id]=document.getElementById(id).value);
+
+  ids.forEach(id=>{
+    data[id]=$(id).value;
+  });
+
+  data.basePlaceId=selectedBasePlaceId;
+
   localStorage.setItem(key,JSON.stringify(data));
-  const box=document.getElementById('saved');
+
+  $('saveError').classList.add('hidden');
+
+  const box=$('saved');
   box.classList.remove('hidden');
   setTimeout(()=>box.classList.add('hidden'),2200);
 };
+
 load();
 </script>
 </body>
