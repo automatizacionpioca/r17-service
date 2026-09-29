@@ -238,7 +238,7 @@
         </div>
 
         <div class="previewLine">
-          <span>Tiempo invertido en el servicio</span>
+          <span>Tiempo empleado en el servicio</span>
           <b id="previewTime">—</b>
         </div>
 
@@ -261,6 +261,9 @@
           </div>
         </div>
       </div>
+
+      <button class="verde hidden" id="issueBtn" style="margin-top:14px">EMITIR</button>
+      <div id="issueStatus" class="status info hidden"></div>
     </div>
 
   </section>
@@ -272,9 +275,11 @@
 const SERVICE_KEY='r17_active_v1';
 const CFG_KEY='r17_cfg_v1';
 const ROUTER_URL='https://apxrmkdegjnblkbyjsbp.supabase.co/functions/v1/r17-router';
+const ISSUE_URL='https://apxrmkdegjnblkbyjsbp.supabase.co/functions/v1/r17-issue';
 const SUPABASE_PUBLISHABLE='sb_publishable_htgEX8HiRGAjpCVhPw1gfg_tOPxkJoI';
 let currentRoute=null;
 let currentContext=null;
+let lastPreviewCalc=null;
 let selectedCustomerPlaceId=null;
 let autocompleteTimer=null;
 let autocompleteSeq=0;
@@ -410,6 +415,10 @@ function num(v){
   return Number.isFinite(n) ? n : 0;
 }
 
+function round500(v){
+  return Math.round(num(v)/500)*500;
+}
+
 function money(v){
   return new Intl.NumberFormat('es-AR',{
     style:'currency',
@@ -486,16 +495,18 @@ function calculateAmounts(){
   const tollCost=tollCount*num(cfg.toll);
   const partsCost=items.reduce((sum,item)=>sum+(num(item.qty)*num(item.price)),0);
 
-  const cash=kmCost+travelCost+laborCost+tollCost+partsCost;
+  const visitLaborRaw=kmCost+travelCost+laborCost+tollCost;
+  const totalCashRaw=visitLaborRaw+partsCost;
+  const cashRounded=round500(totalCashRaw);
+
   const ivaPercent=(cfg.iva===undefined || String(cfg.iva).trim()==='') ? 21 : num(cfg.iva);
-  const ivaAmount=cash*(ivaPercent/100);
-  const ivaIncluded=cash+ivaAmount;
+  const ivaAmount=cashRounded*(ivaPercent/100);
+  const ivaIncluded=cashRounded+ivaAmount;
 
   return {
     routeKm,
     travelMinutes,
     laborMinutes,
-    totalMinutes:travelMinutes+laborMinutes,
     tollCount,
     items,
     kmCost,
@@ -503,7 +514,9 @@ function calculateAmounts(){
     laborCost,
     tollCost,
     partsCost,
-    cash,
+    visitLaborRaw,
+    totalCashRaw,
+    cashRounded,
     ivaPercent,
     ivaAmount,
     ivaIncluded
@@ -516,9 +529,9 @@ function renderCommercialPreview(calc){
       ? currentContext.customerAddress
       : 'Ubicación GPS registrada al iniciar';
 
-  $('previewTime').textContent=minutesText(calc.totalMinutes);
-  $('previewCash').textContent=money(calc.cash);
-  $('previewPlusIva').textContent=money(calc.cash)+' + IVA';
+  $('previewTime').textContent=minutesText(calc.laborMinutes + calc.travelMinutes);
+  $('previewCash').textContent=money(calc.cashRounded);
+  $('previewPlusIva').textContent=money(calc.cashRounded)+' + IVA';
   $('previewIvaIncluded').textContent=money(calc.ivaIncluded);
 
   const itemsBox=$('previewItems');
@@ -551,7 +564,10 @@ function renderCommercialPreview(calc){
     itemsBox.classList.add('hidden');
   }
 
+  lastPreviewCalc=calc;
   $('preview').classList.remove('hidden');
+  $('issueBtn').classList.remove('hidden');
+  $('issueStatus').classList.add('hidden');
 }
 
 function showRoute(route){
@@ -626,6 +642,8 @@ $('startService').onclick=()=>{
   currentRoute=null;
   currentContext=null;
   $('preview').classList.add('hidden');
+  $('issueBtn').classList.add('hidden');
+  $('issueStatus').classList.add('hidden');
   $('geoInfo').classList.remove('hidden');
   $('geoInfo').textContent='Obteniendo ubicación…';
 
@@ -723,6 +741,8 @@ $('address').addEventListener('input',()=>{
   currentRoute=null;
   currentContext=null;
   $('preview').classList.add('hidden');
+  $('issueBtn').classList.add('hidden');
+  $('issueStatus').classList.add('hidden');
   selectedCustomerPlaceId=null;
   $('addressConfirmed').classList.add('hidden');
   $('addressInfo').classList.add('hidden');
@@ -884,11 +904,178 @@ $('parts').onchange=()=>{
 
 $('addItemBtn').onclick=()=>addItem();
 
+
+function serviceAddressForHistory(){
+  const st=readState();
+  if(st && st.lat!=null && st.lng!=null){
+    return 'GPS '+Number(st.lat).toFixed(6)+', '+Number(st.lng).toFixed(6);
+  }
+  return 'Ubicación GPS registrada';
+}
+
+function issuedPayload(calc){
+  const cfg=readConfig();
+  const st=readState();
+
+  const customerAddress=
+    currentContext.mode==='quote'
+      ? currentContext.customerAddress
+      : serviceAddressForHistory();
+
+  const payload={
+    mode:currentContext.mode,
+    customer_address:customerAddress,
+    customer_place_id:
+      currentContext.mode==='quote'
+        ? (currentContext.customerPlaceId || null)
+        : null,
+
+    service_lat:
+      currentContext.mode==='service' && st && st.lat!=null
+        ? Number(st.lat)
+        : null,
+    service_lng:
+      currentContext.mode==='service' && st && st.lng!=null
+        ? Number(st.lng)
+        : null,
+
+    started_at:
+      currentContext.mode==='service' && st && st.startAt
+        ? new Date(st.startAt).toISOString()
+        : null,
+    finished_at:
+      currentContext.mode==='service' && st && st.endAt
+        ? new Date(st.endAt).toISOString()
+        : null,
+
+    one_way_km:num(currentRoute.one_way?.distance_km),
+    round_trip_km:num(currentRoute.round_trip?.distance_km),
+    one_way_minutes:num(currentRoute.one_way?.duration_minutes),
+    round_trip_minutes:num(currentRoute.round_trip?.duration_minutes),
+    labor_minutes:calc.laborMinutes,
+
+    toll_count:calc.tollCount,
+    items:calc.items,
+
+    rate_km:num(cfg.km),
+    rate_travel_hour:num(cfg.travel),
+    rate_labor_hour:num(cfg.labor),
+    rate_toll:num(cfg.toll),
+    iva_percent:calc.ivaPercent,
+
+    cost_km:calc.kmCost,
+    cost_travel:calc.travelCost,
+    cost_labor:calc.laborCost,
+    cost_tolls:calc.tollCost,
+    cost_items:calc.partsCost,
+
+    visit_labor_raw:calc.visitLaborRaw,
+    total_cash_raw:calc.totalCashRaw,
+    total_cash_rounded:calc.cashRounded,
+    iva_amount:calc.ivaAmount,
+    total_invoice:calc.ivaIncluded,
+
+    pdf_version:'r17-pdf-v1',
+    pdf_name:null,
+
+    snapshot:{
+      base_address:String(cfg.base||''),
+      base_place_id:cfg.basePlaceId||null,
+      customer_address:customerAddress,
+      customer_place_id:
+        currentContext.mode==='quote'
+          ? (currentContext.customerPlaceId||null)
+          : null,
+      one_way_km:num(currentRoute.one_way?.distance_km),
+      round_trip_km:num(currentRoute.round_trip?.distance_km),
+      one_way_minutes:num(currentRoute.one_way?.duration_minutes),
+      round_trip_minutes:num(currentRoute.round_trip?.duration_minutes),
+      labor_minutes:calc.laborMinutes,
+      total_employed_minutes:calc.laborMinutes+calc.travelMinutes,
+      toll_count:calc.tollCount,
+      items:calc.items,
+      prices:{
+        visit_labor_raw:calc.visitLaborRaw,
+        parts:calc.partsCost,
+        total_cash_raw:calc.totalCashRaw,
+        total_cash_rounded:calc.cashRounded,
+        iva_percent:calc.ivaPercent,
+        iva_amount:calc.ivaAmount,
+        total_invoice:calc.ivaIncluded
+      },
+      rates:{
+        km:num(cfg.km),
+        travel_hour:num(cfg.travel),
+        labor_hour:num(cfg.labor),
+        toll:num(cfg.toll)
+      }
+    }
+  };
+
+  return payload;
+}
+
+async function issueToHistory(payload){
+  const response=await fetch(ISSUE_URL,{
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'apikey':SUPABASE_PUBLISHABLE,
+      'Authorization':'Bearer '+SUPABASE_PUBLISHABLE
+    },
+    body:JSON.stringify(payload)
+  });
+
+  let data=null;
+  try{
+    data=await response.json();
+  }catch(e){
+    throw new Error('La función de emisión respondió con un formato inválido.');
+  }
+
+  if(!response.ok || !data.ok){
+    const detail=data && data.detail ? ' · '+data.detail : '';
+    throw new Error((data && data.error ? data.error : 'No se pudo emitir')+detail);
+  }
+
+  return data;
+}
+
+$('issueBtn').onclick=async()=>{
+  const status=$('issueStatus');
+
+  status.classList.remove('hidden');
+  status.textContent='Emitiendo y guardando en Historial…';
+  $('issueBtn').disabled=true;
+
+  try{
+    const calc=calculateAmounts();
+    const payload=issuedPayload(calc);
+    const result=await issueToHistory(payload);
+
+    localStorage.setItem('r17_last_issued_v1',JSON.stringify({
+      id:result.id,
+      created_at:result.created_at,
+      payload
+    }));
+
+    status.textContent='Emitido correctamente y guardado en Historial.';
+    $('issueBtn').textContent='EMITIDO';
+  }catch(e){
+    status.textContent='No se pudo emitir: '+(e.message||String(e));
+    $('issueBtn').disabled=false;
+  }
+};
+
 $('previewBtn').onclick=()=>{
   const errorBox=$('previewError');
 
   errorBox.classList.add('hidden');
   $('preview').classList.add('hidden');
+  $('issueBtn').classList.add('hidden');
+  $('issueBtn').disabled=false;
+  $('issueBtn').textContent='EMITIR';
+  $('issueStatus').classList.add('hidden');
 
   try{
     const calc=calculateAmounts();
