@@ -5,6 +5,60 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>piOca® Servicio</title>
 <link rel="stylesheet" href="styles.css">
+<style>
+.autocompleteWrap{position:relative}
+.addressSuggestions{
+  position:absolute;
+  left:0;right:0;top:100%;
+  z-index:50;
+  background:#fff;
+  border:1px solid #d8dde5;
+  border-radius:12px;
+  box-shadow:0 10px 28px rgba(0,0,0,.14);
+  overflow:hidden;
+  margin-top:6px;
+  max-height:290px;
+  overflow-y:auto;
+}
+.addressSuggestion{
+  width:100%;
+  display:block;
+  text-align:left;
+  background:#fff;
+  color:#1b2430;
+  border:0;
+  border-bottom:1px solid #edf0f4;
+  padding:12px 14px;
+  margin:0;
+  cursor:pointer;
+  font:inherit;
+}
+.addressSuggestion:last-child{border-bottom:0}
+.addressSuggestion:active{background:#f2f6fb}
+.addressSuggestion b{
+  display:block;
+  font-size:14px;
+  line-height:1.25;
+}
+.addressSuggestion span{
+  display:block;
+  margin-top:3px;
+  font-size:12px;
+  line-height:1.3;
+  color:#697386;
+}
+.addressSuggestion.info{
+  cursor:default;
+  color:#697386;
+  font-size:13px;
+}
+.addressConfirmed{
+  font-size:12px;
+  margin-top:7px;
+  color:#16803a;
+  font-weight:700;
+}
+</style>
 </head>
 <body>
 <main class="shell">
@@ -63,7 +117,12 @@
       <p>Para calcular un service desde casa antes de ir al domicilio.</p>
 
       <label for="address">Dirección del cliente</label>
-      <input id="address" autocomplete="street-address" placeholder="Ej.: Av. Maipú 2300, Olivos">
+      <div class="autocompleteWrap">
+        <input id="address" autocomplete="off" autocapitalize="words"
+          placeholder="Ej.: Av. Maipú 2300, Olivos">
+        <div id="addressSuggestions" class="addressSuggestions hidden"></div>
+      </div>
+      <div id="addressConfirmed" class="addressConfirmed hidden">✓ Dirección seleccionada de Google</div>
 
       <label for="estimatedMinutes">Tiempo estimado de trabajo</label>
       <input id="estimatedMinutes" type="number" min="0" inputmode="numeric" placeholder="Minutos">
@@ -131,6 +190,9 @@ const CFG_KEY='r17_cfg_v1';
 const ROUTER_URL='https://apxrmkdegjnblkbyjsbp.supabase.co/functions/v1/r17-router';
 const SUPABASE_PUBLISHABLE='sb_publishable_htgEX8HiRGAjpCVhPw1gfg_tOPxkJoI';
 let currentRoute=null;
+let selectedCustomerPlaceId=null;
+let autocompleteTimer=null;
+let autocompleteSeq=0;
 
 const $=id=>document.getElementById(id);
 
@@ -141,6 +203,90 @@ function readConfig(){
   }catch(e){
     return {};
   }
+}
+
+
+async function requestAutocomplete(input){
+  const response=await fetch(ROUTER_URL,{
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'apikey':SUPABASE_PUBLISHABLE,
+      'Authorization':'Bearer '+SUPABASE_PUBLISHABLE
+    },
+    body:JSON.stringify({
+      action:'autocomplete',
+      input:String(input||'').trim()
+    })
+  });
+
+  let data=null;
+  try{
+    data=await response.json();
+  }catch(e){
+    throw new Error('La búsqueda de direcciones respondió con un formato inválido.');
+  }
+
+  if(!response.ok || !data.ok){
+    throw new Error(routeErrorText(data,response.status));
+  }
+
+  return Array.isArray(data.suggestions) ? data.suggestions : [];
+}
+
+function hideAddressSuggestions(){
+  $('addressSuggestions').classList.add('hidden');
+}
+
+function renderAddressSuggestions(items){
+  const box=$('addressSuggestions');
+  box.innerHTML='';
+
+  if(!items.length){
+    const empty=document.createElement('div');
+    empty.className='addressSuggestion info';
+    empty.textContent='No se encontraron direcciones.';
+    box.appendChild(empty);
+    box.classList.remove('hidden');
+    return;
+  }
+
+  items.forEach(item=>{
+    const btn=document.createElement('button');
+    btn.type='button';
+    btn.className='addressSuggestion';
+
+    const main=document.createElement('b');
+    main.textContent=item.mainText || item.text || '';
+
+    const secondary=document.createElement('span');
+    secondary.textContent=item.secondaryText || '';
+
+    btn.appendChild(main);
+    if(secondary.textContent) btn.appendChild(secondary);
+
+    btn.onclick=()=>{
+      $('address').value=item.text || item.mainText || '';
+      selectedCustomerPlaceId=item.placeId || null;
+      $('addressConfirmed').classList.toggle('hidden',!selectedCustomerPlaceId);
+      $('addressInfo').classList.add('hidden');
+      hideAddressSuggestions();
+    };
+
+    box.appendChild(btn);
+  });
+
+  box.classList.remove('hidden');
+}
+
+function showAutocompleteMessage(text){
+  const box=$('addressSuggestions');
+  box.innerHTML='';
+  const row=document.createElement('div');
+  row.className='addressSuggestion info';
+  row.textContent=text;
+  box.appendChild(row);
+  box.classList.remove('hidden');
 }
 
 function routeErrorText(data,status){
@@ -327,6 +473,47 @@ $('newService').onclick=()=>{
   }
 };
 
+
+$('address').addEventListener('input',()=>{
+  selectedCustomerPlaceId=null;
+  $('addressConfirmed').classList.add('hidden');
+  $('addressInfo').classList.add('hidden');
+
+  const query=$('address').value.trim();
+
+  if(autocompleteTimer) clearTimeout(autocompleteTimer);
+
+  if(query.length<3){
+    hideAddressSuggestions();
+    return;
+  }
+
+  const seq=++autocompleteSeq;
+  autocompleteTimer=setTimeout(async()=>{
+    showAutocompleteMessage('Buscando direcciones…');
+
+    try{
+      const items=await requestAutocomplete(query);
+      if(seq!==autocompleteSeq) return;
+      renderAddressSuggestions(items);
+    }catch(e){
+      if(seq!==autocompleteSeq) return;
+      showAutocompleteMessage('No se pudieron cargar las sugerencias.');
+    }
+  },300);
+});
+
+$('address').addEventListener('focus',()=>{
+  if($('address').value.trim().length>=3 && !selectedCustomerPlaceId){
+    $('address').dispatchEvent(new Event('input'));
+  }
+});
+
+document.addEventListener('click',(e)=>{
+  const wrap=e.target.closest('.autocompleteWrap');
+  if(!wrap) hideAddressSuggestions();
+});
+
 $('quoteAddress').onclick=async()=>{
   const cfg=readConfig();
   const customerAddress=$('address').value.trim();
@@ -344,6 +531,12 @@ $('quoteAddress').onclick=async()=>{
     return;
   }
 
+  if(!selectedCustomerPlaceId){
+    box.classList.remove('hidden');
+    box.textContent='Seleccioná una dirección de las opciones de Google.';
+    return;
+  }
+
   box.classList.remove('hidden');
   box.textContent='Calculando ruta con Google…';
   $('quoteAddress').disabled=true;
@@ -351,7 +544,7 @@ $('quoteAddress').onclick=async()=>{
   try{
     const route=await calculateRoute(
       {address:String(cfg.base).trim()},
-      {address:customerAddress}
+      {placeId:selectedCustomerPlaceId}
     );
 
     box.textContent='Ruta calculada correctamente.';
