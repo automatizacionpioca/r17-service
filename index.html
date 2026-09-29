@@ -52,7 +52,8 @@
           <span>Ubicación guardada al iniciar</span>
           <b id="savedLocation" style="font-size:14px">—</b>
         </div>
-        <button class="azul" id="continueService">CONTINUAR CÁLCULO</button>
+        <button class="azul" id="continueService">CALCULAR DISTANCIA Y TRASLADO</button>
+        <div class="status info hidden" id="serviceRouteState"></div>
         <button class="claro" id="newService">DESCARTAR Y NUEVO SERVICIO</button>
       </div>
     </div>
@@ -68,14 +69,25 @@
       <input id="estimatedMinutes" type="number" min="0" inputmode="numeric" placeholder="Minutos">
 
       <button class="oscuro" id="quoteAddress">CALCULAR POR DIRECCIÓN</button>
-      <div class="status info hidden" id="addressInfo">
-        En la próxima etapa este campo se conectará con Google para obtener distancia y tiempo de traslado.
-      </div>
+      <div class="status info hidden" id="addressInfo"></div>
     </div>
 
     <div class="card hidden" id="calcCard">
       <h2>Datos para calcular</h2>
       <p>Los valores económicos se toman de Configuración y nunca se muestran al cliente.</p>
+
+      <div id="routeSummary" class="hidden">
+        <div class="row2">
+          <div class="kpi">
+            <span>Distancia total ida y vuelta</span>
+            <b id="routeKm">—</b>
+          </div>
+          <div class="kpi">
+            <span>Tiempo total de traslado</span>
+            <b id="routeMinutes">—</b>
+          </div>
+        </div>
+      </div>
 
       <label for="tolls">Cantidad de peajes</label>
       <select id="tolls">
@@ -115,8 +127,60 @@
 
 <script>
 const SERVICE_KEY='r17_active_v1';
+const CFG_KEY='r17_cfg_v1';
+const ROUTER_URL='https://apxrmkdegjnblkbyjsbp.supabase.co/functions/v1/r17-router';
+const SUPABASE_PUBLISHABLE='sb_publishable_htgEX8HiRGAjpCVhPw1gfg_tOPxkJoI';
+let currentRoute=null;
 
 const $=id=>document.getElementById(id);
+
+
+function readConfig(){
+  try{
+    return JSON.parse(localStorage.getItem(CFG_KEY)||'{}');
+  }catch(e){
+    return {};
+  }
+}
+
+function routeErrorText(data,status){
+  if(data && data.error) return data.error;
+  return 'Error al calcular la ruta ('+status+').';
+}
+
+async function calculateRoute(origin,destination){
+  const response=await fetch(ROUTER_URL,{
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'apikey':SUPABASE_PUBLISHABLE,
+      'Authorization':'Bearer '+SUPABASE_PUBLISHABLE
+    },
+    body:JSON.stringify({origin,destination})
+  });
+
+  let data=null;
+  try{
+    data=await response.json();
+  }catch(e){
+    throw new Error('La función respondió con un formato inválido.');
+  }
+
+  if(!response.ok || !data.ok){
+    throw new Error(routeErrorText(data,response.status));
+  }
+
+  return data;
+}
+
+function showRoute(route){
+  currentRoute=route;
+  $('routeKm').textContent=route.round_trip.distance_km.toFixed(1)+' km';
+  $('routeMinutes').textContent=Math.round(route.round_trip.duration_minutes)+' min';
+  $('routeSummary').classList.remove('hidden');
+  $('calcCard').classList.remove('hidden');
+  $('calcCard').scrollIntoView({behavior:'smooth',block:'start'});
+}
 
 let timerInt=null;
 
@@ -219,9 +283,40 @@ $('finishService').onclick=()=>{
   render();
 };
 
-$('continueService').onclick=()=>{
-  $('calcCard').classList.remove('hidden');
-  $('calcCard').scrollIntoView({behavior:'smooth',block:'start'});
+$('continueService').onclick=async()=>{
+  const st=readState();
+  const cfg=readConfig();
+  const box=$('serviceRouteState');
+
+  if(!cfg.base || !String(cfg.base).trim()){
+    box.classList.remove('hidden');
+    box.textContent='Falta cargar Dirección base / Casa en Configuración.';
+    return;
+  }
+
+  if(!st || st.lat==null || st.lng==null){
+    box.classList.remove('hidden');
+    box.textContent='Este servicio no tiene una ubicación GPS guardada al iniciar.';
+    return;
+  }
+
+  box.classList.remove('hidden');
+  box.textContent='Calculando ruta con Google…';
+  $('continueService').disabled=true;
+
+  try{
+    const route=await calculateRoute(
+      {lat:Number(st.lat),lng:Number(st.lng)},
+      {address:String(cfg.base).trim()}
+    );
+
+    box.textContent='Ruta calculada correctamente.';
+    showRoute(route);
+  }catch(e){
+    box.textContent='No se pudo calcular: '+(e.message||String(e));
+  }finally{
+    $('continueService').disabled=false;
+  }
 };
 
 $('newService').onclick=()=>{
@@ -232,10 +327,40 @@ $('newService').onclick=()=>{
   }
 };
 
-$('quoteAddress').onclick=()=>{
-  $('addressInfo').classList.remove('hidden');
-  $('calcCard').classList.remove('hidden');
-  $('calcCard').scrollIntoView({behavior:'smooth',block:'start'});
+$('quoteAddress').onclick=async()=>{
+  const cfg=readConfig();
+  const customerAddress=$('address').value.trim();
+  const box=$('addressInfo');
+
+  if(!cfg.base || !String(cfg.base).trim()){
+    box.classList.remove('hidden');
+    box.textContent='Falta cargar Dirección base / Casa en Configuración.';
+    return;
+  }
+
+  if(!customerAddress){
+    box.classList.remove('hidden');
+    box.textContent='Ingresá la dirección del cliente.';
+    return;
+  }
+
+  box.classList.remove('hidden');
+  box.textContent='Calculando ruta con Google…';
+  $('quoteAddress').disabled=true;
+
+  try{
+    const route=await calculateRoute(
+      {address:String(cfg.base).trim()},
+      {address:customerAddress}
+    );
+
+    box.textContent='Ruta calculada correctamente.';
+    showRoute(route);
+  }catch(e){
+    box.textContent='No se pudo calcular: '+(e.message||String(e));
+  }finally{
+    $('quoteAddress').disabled=false;
+  }
 };
 
 let itemSeq=0;
