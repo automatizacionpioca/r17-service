@@ -67,6 +67,53 @@
   font-size:12px;
   color:#7a8797;
 }
+
+.clientRatesBlock{
+  margin-top:24px;
+  padding-top:18px;
+  border-top:1px solid #e3e7ed;
+}
+.clientRatesBlock h3{
+  margin:0 0 6px;
+  font-size:17px;
+}
+.clientRatesBlock .muted{
+  margin-bottom:14px;
+}
+.rateTableWrap{
+  margin-top:16px;
+  overflow-x:auto;
+  border:1px solid #e3e7ed;
+  border-radius:12px;
+}
+.rateTable{
+  width:100%;
+  border-collapse:collapse;
+  min-width:520px;
+  background:#fff;
+}
+.rateTable th,
+.rateTable td{
+  padding:10px 12px;
+  text-align:left;
+  border-bottom:1px solid #edf0f4;
+  font-size:13px;
+  white-space:nowrap;
+}
+.rateTable th{
+  background:#f7f9fb;
+  color:#526173;
+  font-size:12px;
+}
+.rateTable tr:last-child td{border-bottom:0}
+.rateTable td:not(:first-child),
+.rateTable th:not(:first-child){text-align:right}
+.rateHint{
+  margin-top:10px;
+  font-size:12px;
+  line-height:1.4;
+  color:#697386;
+}
 </style>
 </head>
 <body>
@@ -128,6 +175,55 @@
       <input id="iva" type="number" min="0" step="0.01" inputmode="decimal" value="21">
       <div class="updatedAt" id="ivaUpdated">Última actualización: sin registro</div>
 
+      <div class="clientRatesBlock">
+        <h3>Tarifas por tipo de cliente</h3>
+        <div class="muted">
+          Estos porcentajes se aplican únicamente al valor hora de traslado y al valor hora de mano de obra. El valor por kilómetro no cambia.
+        </div>
+
+        <label for="consorcioPct">Consorcio / edificio (%)</label>
+        <input id="consorcioPct" type="number" min="0" step="0.01" inputmode="decimal" value="25">
+        <div class="updatedAt" id="consorcioPctUpdated">Última actualización: sin registro</div>
+
+        <label for="industriaPct">Industria (%)</label>
+        <input id="industriaPct" type="number" min="0" step="0.01" inputmode="decimal" value="68">
+        <div class="updatedAt" id="industriaPctUpdated">Última actualización: sin registro</div>
+
+        <div class="rateTableWrap">
+          <table class="rateTable" aria-label="Tarifas resultantes por tipo de cliente">
+            <thead>
+              <tr>
+                <th>Tipo de cliente</th>
+                <th>Traslado / h</th>
+                <th>Mano de obra / h</th>
+                <th>Km</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Particular</td>
+                <td id="rateParticularTravel">—</td>
+                <td id="rateParticularLabor">—</td>
+                <td id="rateParticularKm">—</td>
+              </tr>
+              <tr>
+                <td id="rateConsorcioLabel">Consorcio / edificio</td>
+                <td id="rateConsorcioTravel">—</td>
+                <td id="rateConsorcioLabor">—</td>
+                <td id="rateConsorcioKm">—</td>
+              </tr>
+              <tr>
+                <td id="rateIndustriaLabel">Industria</td>
+                <td id="rateIndustriaTravel">—</td>
+                <td id="rateIndustriaLabor">—</td>
+                <td id="rateIndustriaKm">—</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="rateHint">Los valores se recalculan automáticamente al cambiar las tarifas base o los porcentajes.</div>
+      </div>
+
       <button class="verde" id="save">GUARDAR CONFIGURACIÓN</button>
       <div class="status ok hidden" id="saved">Configuración guardada.</div>
       <div class="status error hidden" id="saveError"></div>
@@ -138,8 +234,8 @@
 </main>
 
 <script>
-const ids=['base','km','travel','labor','toll','iva'];
-const trackedIds=['km','travel','labor','toll','iva'];
+const ids=['base','km','travel','labor','toll','iva','consorcioPct','industriaPct'];
+const trackedIds=['km','travel','labor','toll','iva','consorcioPct','industriaPct'];
 const key='r17_cfg_v1';
 
 function formatUpdateDate(iso){
@@ -178,6 +274,56 @@ let autocompleteSeq=0;
 function $(id){
   return document.getElementById(id);
 }
+
+function configNumber(id){
+  const raw=String($(id).value??'').replace(',','.').trim();
+  if(raw==='') return null;
+  const value=Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
+function money(value){
+  if(value===null || value===undefined || !Number.isFinite(value)) return '—';
+  return new Intl.NumberFormat('es-AR',{
+    style:'currency',
+    currency:'ARS',
+    maximumFractionDigits:0
+  }).format(value);
+}
+
+function percentLabel(value){
+  if(value===null || value===undefined || !Number.isFinite(value)) return '';
+  return ' +'+new Intl.NumberFormat('es-AR',{maximumFractionDigits:2}).format(value)+'%';
+}
+
+function renderClientRates(){
+  const km=configNumber('km');
+  const travel=configNumber('travel');
+  const labor=configNumber('labor');
+  const consorcioPct=configNumber('consorcioPct');
+  const industriaPct=configNumber('industriaPct');
+
+  const consorcioFactor=consorcioPct===null ? null : 1+(consorcioPct/100);
+  const industriaFactor=industriaPct===null ? null : 1+(industriaPct/100);
+
+  $('rateParticularTravel').textContent=money(travel);
+  $('rateParticularLabor').textContent=money(labor);
+  $('rateParticularKm').textContent=money(km);
+
+  $('rateConsorcioLabel').textContent='Consorcio / edificio'+percentLabel(consorcioPct);
+  $('rateConsorcioTravel').textContent=money(travel===null || consorcioFactor===null ? null : travel*consorcioFactor);
+  $('rateConsorcioLabor').textContent=money(labor===null || consorcioFactor===null ? null : labor*consorcioFactor);
+  $('rateConsorcioKm').textContent=money(km);
+
+  $('rateIndustriaLabel').textContent='Industria'+percentLabel(industriaPct);
+  $('rateIndustriaTravel').textContent=money(travel===null || industriaFactor===null ? null : travel*industriaFactor);
+  $('rateIndustriaLabor').textContent=money(labor===null || industriaFactor===null ? null : labor*industriaFactor);
+  $('rateIndustriaKm').textContent=money(km);
+}
+
+['km','travel','labor','consorcioPct','industriaPct'].forEach(id=>{
+  $(id).addEventListener('input',renderClientRates);
+});
 
 async function requestAutocomplete(input){
   const response=await fetch(ROUTER_URL,{
@@ -311,14 +457,26 @@ function load(){
       $('iva').value='21';
     }
 
+    if(v.consorcioPct===undefined || String(v.consorcioPct).trim()===''){
+      $('consorcioPct').value='25';
+    }
+
+    if(v.industriaPct===undefined || String(v.industriaPct).trim()===''){
+      $('industriaPct').value='68';
+    }
+
     if(v.basePlaceId){
       selectedBasePlaceId=v.basePlaceId;
       $('baseConfirmed').classList.remove('hidden');
     }
 
     renderUpdateDates(v);
+    renderClientRates();
   }catch(e){
+    $('consorcioPct').value='25';
+    $('industriaPct').value='68';
     renderUpdateDates({});
+    renderClientRates();
   }
 }
 
@@ -333,6 +491,21 @@ $('save').onclick=()=>{
 
   if(!selectedBasePlaceId){
     $('saveError').textContent='Seleccioná la Dirección base / Casa desde las opciones de Google.';
+    $('saveError').classList.remove('hidden');
+    return;
+  }
+
+  const consorcioPct=configNumber('consorcioPct');
+  const industriaPct=configNumber('industriaPct');
+
+  if(consorcioPct===null || consorcioPct<0){
+    $('saveError').textContent='Ingresá un porcentaje válido para Consorcio / edificio.';
+    $('saveError').classList.remove('hidden');
+    return;
+  }
+
+  if(industriaPct===null || industriaPct<0){
+    $('saveError').textContent='Ingresá un porcentaje válido para Industria.';
     $('saveError').classList.remove('hidden');
     return;
   }
@@ -374,6 +547,7 @@ $('save').onclick=()=>{
   localStorage.setItem(key,JSON.stringify(data));
 
   renderUpdateDates(data);
+  renderClientRates();
   $('saveError').classList.add('hidden');
 
   const box=$('saved');
