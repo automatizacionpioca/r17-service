@@ -1,0 +1,984 @@
+name: Compilar piOca Cotizador APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Instalar Android 35
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Validar archivos y firma
+        env:
+          COTIZADOR_KEYSTORE_B64: ${{ secrets.COTIZADOR_KEYSTORE_B64 }}
+          COTIZADOR_KEYSTORE_PASS: ${{ secrets.COTIZADOR_KEYSTORE_PASS }}
+        run: |
+          set -e
+          test -f icon-cotizador-pioca.png || { echo "Falta icon-cotizador-pioca.png en la raíz del repositorio"; exit 1; }
+          test -n "$COTIZADOR_KEYSTORE_B64" || { echo "Falta el secret COTIZADOR_KEYSTORE_B64"; exit 1; }
+          test -n "$COTIZADOR_KEYSTORE_PASS" || { echo "Falta el secret COTIZADOR_KEYSTORE_PASS"; exit 1; }
+
+      - name: Crear proyecto Android
+        shell: bash
+        run: |
+          set -e
+
+          rm -rf android-cotizador
+          mkdir -p android-cotizador/app/src/main/java/ar/com/pioca/cotizador
+          mkdir -p android-cotizador/app/src/main/res/xml
+          mkdir -p android-cotizador/app/src/main/res/values
+          mkdir -p android-cotizador/app/src/main/res/mipmap-mdpi
+          mkdir -p android-cotizador/app/src/main/res/mipmap-hdpi
+          mkdir -p android-cotizador/app/src/main/res/mipmap-xhdpi
+          mkdir -p android-cotizador/app/src/main/res/mipmap-xxhdpi
+          mkdir -p android-cotizador/app/src/main/res/mipmap-xxxhdpi
+
+          cat > android-cotizador/settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+
+          rootProject.name = 'piOcaCotizador'
+          include ':app'
+          EOF
+
+          cat > android-cotizador/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.7.3' apply false
+          }
+          EOF
+
+          cat > android-cotizador/app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'ar.com.pioca.cotizador'
+              compileSdk 35
+
+              defaultConfig {
+                  applicationId 'ar.com.pioca.cotizador'
+                  minSdk 26
+                  targetSdk 35
+                  versionCode 1
+                  versionName '1.0'
+              }
+
+              signingConfigs {
+                  release {
+                      storeFile file(System.getenv('COTIZADOR_KEYSTORE_PATH'))
+                      storePassword System.getenv('COTIZADOR_KEYSTORE_PASS')
+                      keyAlias 'pioca'
+                      keyPassword System.getenv('COTIZADOR_KEYSTORE_PASS')
+                  }
+              }
+
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                      shrinkResources false
+                      signingConfig signingConfigs.release
+                  }
+              }
+          }
+
+          dependencies {
+              implementation 'androidx.core:core:1.15.0'
+          }
+          EOF
+
+          cat > android-cotizador/app/src/main/res/values/strings.xml <<'EOF'
+          <resources>
+              <string name="app_name">piOca Cotizador</string>
+          </resources>
+          EOF
+
+          cat > android-cotizador/app/src/main/res/values/styles.xml <<'EOF'
+          <resources>
+              <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+                  <item name="android:fontFamily">sans</item>
+                  <item name="android:windowActionModeOverlay">true</item>
+                  <item name="android:navigationBarColor">#FFFFFF</item>
+                  <item name="android:statusBarColor">#FFFFFF</item>
+                  <item name="android:windowLightStatusBar">true</item>
+              </style>
+          </resources>
+          EOF
+
+          cat > android-cotizador/app/src/main/res/xml/file_paths.xml <<'EOF'
+          <paths xmlns:android="http://schemas.android.com/apk/res/android">
+              <cache-path name="shared" path="shared/" />
+          </paths>
+          EOF
+
+          cat > android-cotizador/app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+              <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+              <application
+                  android:allowBackup="true"
+                  android:fullBackupContent="true"
+                  android:icon="@mipmap/ic_launcher"
+                  android:label="piOca Cotizador"
+                  android:supportsRtl="true"
+                  android:theme="@style/AppTheme"
+                  android:usesCleartextTraffic="false">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:screenOrientation="portrait">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+                  <service
+                      android:name=".BackgroundLocationService"
+                      android:exported="false"
+                      android:foregroundServiceType="location"
+                      android:stopWithTask="false" />
+
+                  <provider
+                      android:name="androidx.core.content.FileProvider"
+                      android:authorities="ar.com.pioca.cotizador.fileprovider"
+                      android:exported="false"
+                      android:grantUriPermissions="true">
+                      <meta-data
+                          android:name="android.support.FILE_PROVIDER_PATHS"
+                          android:resource="@xml/file_paths" />
+                  </provider>
+
+              </application>
+          </manifest>
+          EOF
+
+          cat > android-cotizador/app/src/main/java/ar/com/pioca/cotizador/MainActivity.java <<'EOF'
+          package ar.com.pioca.cotizador;
+
+          import android.Manifest;
+          import android.app.Activity;
+          import android.app.AlertDialog;
+          import android.content.BroadcastReceiver;
+          import android.content.ClipData;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.IntentFilter;
+          import android.content.SharedPreferences;
+          import android.content.pm.PackageManager;
+          import android.net.Uri;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.os.PowerManager;
+          import android.provider.Settings;
+          import android.util.Base64;
+          import android.webkit.GeolocationPermissions;
+          import android.webkit.JavascriptInterface;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import android.widget.Toast;
+
+          import androidx.core.content.FileProvider;
+
+          import org.json.JSONObject;
+
+          import java.io.File;
+          import java.io.FileOutputStream;
+
+          public class MainActivity extends Activity {
+
+              private static final String APP_URL = "https://automatizacionpioca.github.io/r17-service/";
+              private static final String SERVICE_KEY = "r17_active_v1";
+              public static final String ACTION_AUTO_FINISH = "ar.com.pioca.cotizador.AUTO_FINISH";
+
+              private static final int REQ_LOCATION = 1001;
+              private static final int REQ_BACKGROUND = 1002;
+              private static final int REQ_NOTIFICATIONS = 1003;
+
+              private WebView webView;
+              private boolean pageReady = false;
+              private boolean backgroundDialogShown = false;
+              private boolean batteryDialogShown = false;
+              private GeolocationPermissions.Callback pendingGeoCallback;
+              private String pendingGeoOrigin;
+
+              private final BroadcastReceiver autoFinishReceiver = new BroadcastReceiver() {
+                  @Override
+                  public void onReceive(Context context, Intent intent) {
+                      applyPendingAutoFinish();
+                  }
+              };
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+
+                  webView = new WebView(this);
+                  setContentView(webView);
+
+                  WebSettings s = webView.getSettings();
+                  s.setJavaScriptEnabled(true);
+                  s.setDomStorageEnabled(true);
+                  s.setDatabaseEnabled(true);
+                  s.setGeolocationEnabled(true);
+                  s.setAllowFileAccess(false);
+                  s.setAllowContentAccess(true);
+                  s.setCacheMode(WebSettings.LOAD_DEFAULT);
+
+                  webView.addJavascriptInterface(new NativeBridge(), "AndroidCotizador");
+
+                  webView.setWebViewClient(new WebViewClient() {
+                      @Override
+                      public void onPageFinished(WebView view, String url) {
+                          super.onPageFinished(view, url);
+                          pageReady = true;
+                          installNativeHooks();
+                          applyPendingAutoFinish();
+                      }
+                  });
+
+                  webView.setWebChromeClient(new WebChromeClient() {
+                      @Override
+                      public void onGeolocationPermissionsShowPrompt(
+                              String origin,
+                              GeolocationPermissions.Callback callback) {
+
+                          if (hasFineLocation()) {
+                              callback.invoke(origin, true, false);
+                          } else {
+                              pendingGeoOrigin = origin;
+                              pendingGeoCallback = callback;
+                              requestLocationPermission();
+                          }
+                      }
+                  });
+
+                  if (Build.VERSION.SDK_INT >= 33) {
+                      registerReceiver(
+                              autoFinishReceiver,
+                              new IntentFilter(ACTION_AUTO_FINISH),
+                              Context.RECEIVER_NOT_EXPORTED
+                      );
+                  } else {
+                      registerReceiver(autoFinishReceiver, new IntentFilter(ACTION_AUTO_FINISH));
+                  }
+
+                  webView.loadUrl(APP_URL);
+                  webView.postDelayed(this::beginPermissionFlow, 800);
+              }
+
+              private boolean hasFineLocation() {
+                  return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                          == PackageManager.PERMISSION_GRANTED;
+              }
+
+              private boolean hasBackgroundLocation() {
+                  if (Build.VERSION.SDK_INT < 29) return true;
+                  return checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                          == PackageManager.PERMISSION_GRANTED;
+              }
+
+              private void requestLocationPermission() {
+                  requestPermissions(
+                          new String[]{
+                                  Manifest.permission.ACCESS_FINE_LOCATION,
+                                  Manifest.permission.ACCESS_COARSE_LOCATION
+                          },
+                          REQ_LOCATION
+                  );
+              }
+
+              private void beginPermissionFlow() {
+                  if (!hasFineLocation()) {
+                      requestLocationPermission();
+                      return;
+                  }
+
+                  if (Build.VERSION.SDK_INT >= 29 && !hasBackgroundLocation() && !backgroundDialogShown) {
+                      maybeAskBackgroundLocation();
+                      return;
+                  }
+
+                  if (Build.VERSION.SDK_INT >= 33 &&
+                          checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                                  != PackageManager.PERMISSION_GRANTED) {
+                      maybeAskNotifications();
+                      return;
+                  }
+
+                  maybeAskBatteryOptimization();
+              }
+
+              private void maybeAskBackgroundLocation() {
+                  if (Build.VERSION.SDK_INT < 29 || hasBackgroundLocation()) return;
+
+                  if (Build.VERSION.SDK_INT == 29) {
+                      requestPermissions(
+                              new String[]{Manifest.permission.ACCESS_BACKGROUND_LOCATION},
+                              REQ_BACKGROUND
+                      );
+                      return;
+                  }
+
+                  if (backgroundDialogShown) return;
+                  backgroundDialogShown = true;
+
+                  new AlertDialog.Builder(this)
+                          .setTitle("Permitir ubicación permanente")
+                          .setMessage(
+                                  "Para finalizar automáticamente un servicio aunque bloquees o cierres la app, " +
+                                  "habilitá Ubicación y elegí ‘Permitir todo el tiempo’."
+                          )
+                          .setPositiveButton("ABRIR AJUSTES", (d, which) -> {
+                              Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                              i.setData(Uri.parse("package:" + getPackageName()));
+                              startActivity(i);
+                          })
+                          .setNegativeButton("AHORA NO", null)
+                          .show();
+              }
+
+              private void maybeAskNotifications() {
+                  if (Build.VERSION.SDK_INT >= 33 &&
+                          checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                                  != PackageManager.PERMISSION_GRANTED) {
+                      requestPermissions(
+                              new String[]{Manifest.permission.POST_NOTIFICATIONS},
+                              REQ_NOTIFICATIONS
+                      );
+                  }
+              }
+
+              private void maybeAskBatteryOptimization() {
+                  if (batteryDialogShown) return;
+
+                  PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+                  if (pm != null && pm.isIgnoringBatteryOptimizations(getPackageName())) return;
+
+                  batteryDialogShown = true;
+
+                  new AlertDialog.Builder(this)
+                          .setTitle("Permitir funcionamiento en segundo plano")
+                          .setMessage(
+                                  "Para que el control de ubicación siga activo con la pantalla bloqueada, " +
+                                  "conviene excluir piOca Cotizador del ahorro de batería."
+                          )
+                          .setPositiveButton("PERMITIR", (d, which) -> {
+                              try {
+                                  Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                                  i.setData(Uri.parse("package:" + getPackageName()));
+                                  startActivity(i);
+                              } catch (Exception e) {
+                                  Intent i = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
+                                  startActivity(i);
+                              }
+                          })
+                          .setNegativeButton("AHORA NO", null)
+                          .show();
+              }
+
+              @Override
+              public void onRequestPermissionsResult(
+                      int requestCode,
+                      String[] permissions,
+                      int[] grantResults) {
+
+                  super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+
+                  if (requestCode == REQ_LOCATION) {
+                      boolean granted = hasFineLocation();
+
+                      if (pendingGeoCallback != null && pendingGeoOrigin != null) {
+                          pendingGeoCallback.invoke(pendingGeoOrigin, granted, false);
+                          pendingGeoCallback = null;
+                          pendingGeoOrigin = null;
+                      }
+
+                      if (granted) {
+                          beginPermissionFlow();
+                      }
+                  } else if (requestCode == REQ_BACKGROUND || requestCode == REQ_NOTIFICATIONS) {
+                      beginPermissionFlow();
+                  }
+              }
+
+              private void installNativeHooks() {
+                  String js =
+                          "(function(){" +
+                          "try{" +
+                          "if(!window.__piocaNativeHook){" +
+                          "window.__piocaNativeHook=true;" +
+                          "var _set=Storage.prototype.setItem;" +
+                          "Storage.prototype.setItem=function(k,v){" +
+                          "var r=_set.apply(this,arguments);" +
+                          "try{if(this===localStorage&&k==='" + SERVICE_KEY + "'&&window.AndroidCotizador){AndroidCotizador.syncServiceState(String(v));}}catch(e){}" +
+                          "return r;};" +
+                          "var _remove=Storage.prototype.removeItem;" +
+                          "Storage.prototype.removeItem=function(k){" +
+                          "var r=_remove.apply(this,arguments);" +
+                          "try{if(this===localStorage&&k==='" + SERVICE_KEY + "'&&window.AndroidCotizador){AndroidCotizador.syncServiceState('');}}catch(e){}" +
+                          "return r;};" +
+                          "var nativeShare=function(data){return new Promise(function(resolve,reject){" +
+                          "try{" +
+                          "var f=data&&data.files&&data.files[0];" +
+                          "if(!f){reject(new Error('No hay archivo para compartir'));return;}" +
+                          "var reader=new FileReader();" +
+                          "reader.onload=function(){try{AndroidCotizador.sharePdf(String(reader.result),f.name||'piOca.pdf',(data&&data.text)||'');resolve();}catch(e){reject(e);}};" +
+                          "reader.onerror=function(){reject(reader.error||new Error('No se pudo leer el PDF'));};" +
+                          "reader.readAsDataURL(f);" +
+                          "}catch(e){reject(e);}" +
+                          "});};" +
+                          "try{Object.defineProperty(navigator,'share',{configurable:true,value:nativeShare});}catch(e){try{navigator.share=nativeShare;}catch(x){}}" +
+                          "var nativeCanShare=function(){return true;};" +
+                          "try{Object.defineProperty(navigator,'canShare',{configurable:true,value:nativeCanShare});}catch(e){try{navigator.canShare=nativeCanShare;}catch(x){}}" +
+                          "if(window.PiocaPDF&&!window.PiocaPDF.__nativeSharePatched){" +
+                          "window.PiocaPDF.__nativeSharePatched=true;" +
+                          "window.PiocaPDF.sharePdf=async function(record){" +
+                          "var blob=await window.PiocaPDF.build(record);" +
+                          "var name=window.PiocaPDF.fileName(record);" +
+                          "var msg=window.PiocaPDF.message||'';" +
+                          "try{if(window.PiocaPDF.copyMessage){await window.PiocaPDF.copyMessage();}}catch(e){}" +
+                          "return await new Promise(function(resolve,reject){" +
+                          "var reader=new FileReader();" +
+                          "reader.onload=function(){try{AndroidCotizador.sharePdf(String(reader.result),name,msg);resolve({shared:true,messageCopied:true,name:name});}catch(e){reject(e);}};" +
+                          "reader.onerror=function(){reject(reader.error||new Error('No se pudo leer el PDF'));};" +
+                          "reader.readAsDataURL(blob);" +
+                          "});" +
+                          "};" +
+                          "}" +
+                          "}" +
+                          "var cur=localStorage.getItem('" + SERVICE_KEY + "');" +
+                          "if(window.AndroidCotizador){AndroidCotizador.syncServiceState(cur||'');}" +
+                          "}catch(e){}" +
+                          "})();";
+
+                  webView.evaluateJavascript(js, null);
+              }
+
+              private void handleServiceState(String json) {
+                  try {
+                      if (json == null || json.trim().isEmpty()) {
+                          stopNativeTracking();
+                          return;
+                      }
+
+                      JSONObject o = new JSONObject(json);
+                      String status = o.optString("status", "");
+
+                      if (!"running".equals(status)) {
+                          stopNativeTracking();
+                          return;
+                      }
+
+                      if (!o.has("lat") || o.isNull("lat") || !o.has("lng") || o.isNull("lng")) {
+                          return;
+                      }
+
+                      long startAt = o.optLong("startAt", 0L);
+                      double lat = o.optDouble("lat", Double.NaN);
+                      double lng = o.optDouble("lng", Double.NaN);
+                      double accuracy = o.optDouble("accuracy", 100.0);
+
+                      if (startAt <= 0 || Double.isNaN(lat) || Double.isNaN(lng)) return;
+
+                      SharedPreferences p = getSharedPreferences("native_tracking", MODE_PRIVATE);
+                      p.edit()
+                              .putBoolean("tracking_active", true)
+                              .putLong("startAt", startAt)
+                              .putLong("lat_bits", Double.doubleToRawLongBits(lat))
+                              .putLong("lng_bits", Double.doubleToRawLongBits(lng))
+                              .putLong("accuracy_bits", Double.doubleToRawLongBits(accuracy))
+                              .apply();
+
+                      if (hasFineLocation()) {
+                          Intent i = new Intent(this, BackgroundLocationService.class);
+                          i.putExtra("startAt", startAt);
+                          i.putExtra("lat", lat);
+                          i.putExtra("lng", lng);
+                          i.putExtra("accuracy", accuracy);
+                          startForegroundService(i);
+                      }
+                  } catch (Exception ignored) {
+                  }
+              }
+
+              private void stopNativeTracking() {
+                  getSharedPreferences("native_tracking", MODE_PRIVATE)
+                          .edit()
+                          .putBoolean("tracking_active", false)
+                          .apply();
+
+                  stopService(new Intent(this, BackgroundLocationService.class));
+              }
+
+              private void applyPendingAutoFinish() {
+                  if (!pageReady) return;
+
+                  SharedPreferences p = getSharedPreferences("native_tracking", MODE_PRIVATE);
+                  if (!p.getBoolean("pending_auto_finish", false)) return;
+
+                  long startAt = p.getLong("finish_startAt", 0L);
+                  long endAt = p.getLong("finish_endAt", 0L);
+                  double lat = Double.longBitsToDouble(p.getLong("finish_lat_bits", 0L));
+                  double lng = Double.longBitsToDouble(p.getLong("finish_lng_bits", 0L));
+                  double accuracy = Double.longBitsToDouble(p.getLong("finish_accuracy_bits", 0L));
+                  double distance = Double.longBitsToDouble(p.getLong("finish_distance_bits", 0L));
+
+                  String js =
+                          "(function(){try{" +
+                          "var raw=localStorage.getItem('" + SERVICE_KEY + "');" +
+                          "if(!raw)return false;" +
+                          "var st=JSON.parse(raw);" +
+                          "if(st.status==='running'&&Number(st.startAt)===" + startAt + "){" +
+                          "st.status='finished';" +
+                          "st.endAt=" + endAt + ";" +
+                          "st.autoFinished=true;" +
+                          "st.autoFinishDistanceM=" + distance + ";" +
+                          "st.autoFinishDetectedAt=" + endAt + ";" +
+                          "st.autoFinishLat=" + lat + ";" +
+                          "st.autoFinishLng=" + lng + ";" +
+                          "st.autoFinishAccuracy=" + accuracy + ";" +
+                          "localStorage.setItem('" + SERVICE_KEY + "',JSON.stringify(st));" +
+                          "if(typeof render==='function'){render();}" +
+                          "if(typeof ensureServiceAddress==='function'){setTimeout(function(){ensureServiceAddress();},150);}" +
+                          "return true;}" +
+                          "return false;" +
+                          "}catch(e){return false;}})();";
+
+                  webView.evaluateJavascript(js, value ->
+                          p.edit().putBoolean("pending_auto_finish", false).apply()
+                  );
+              }
+
+              private File savePdfToCache(String dataUrl, String requestedName) throws Exception {
+                  int comma = dataUrl.indexOf(',');
+                  String b64 = comma >= 0 ? dataUrl.substring(comma + 1) : dataUrl;
+                  byte[] bytes = Base64.decode(b64, Base64.DEFAULT);
+
+                  String name = requestedName == null || requestedName.trim().isEmpty()
+                          ? "piOca-Cotizador.pdf"
+                          : requestedName;
+
+                  name = name.replaceAll("[\\\\/:*?\"<>|]", "_");
+                  if (!name.toLowerCase().endsWith(".pdf")) name += ".pdf";
+
+                  File dir = new File(getCacheDir(), "shared");
+                  if (!dir.exists()) dir.mkdirs();
+
+                  File file = new File(dir, name);
+                  try (FileOutputStream fos = new FileOutputStream(file)) {
+                      fos.write(bytes);
+                  }
+                  return file;
+              }
+
+              private void sharePdfNative(String dataUrl, String name, String message) {
+                  new Thread(() -> {
+                      try {
+                          File file = savePdfToCache(dataUrl, name);
+                          Uri uri = FileProvider.getUriForFile(
+                                  this,
+                                  getPackageName() + ".fileprovider",
+                                  file
+                          );
+
+                          runOnUiThread(() -> {
+                              Intent send = new Intent(Intent.ACTION_SEND);
+                              send.setType("application/pdf");
+                              send.putExtra(Intent.EXTRA_STREAM, uri);
+                              if (message != null && !message.isEmpty()) {
+                                  send.putExtra(Intent.EXTRA_TEXT, message);
+                              }
+                              send.setClipData(ClipData.newRawUri("PDF piOca", uri));
+                              send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                              startActivity(Intent.createChooser(send, "Compartir resumen de servicio"));
+                          });
+                      } catch (Exception e) {
+                          runOnUiThread(() -> Toast.makeText(
+                                  this,
+                                  "No se pudo compartir el PDF: " + e.getMessage(),
+                                  Toast.LENGTH_LONG
+                          ).show());
+                      }
+                  }).start();
+              }
+
+              public class NativeBridge {
+                  @JavascriptInterface
+                  public void syncServiceState(String json) {
+                      runOnUiThread(() -> handleServiceState(json));
+                  }
+
+                  @JavascriptInterface
+                  public void sharePdf(String dataUrl, String fileName, String message) {
+                      sharePdfNative(dataUrl, fileName, message);
+                  }
+              }
+
+              @Override
+              protected void onResume() {
+                  super.onResume();
+                  if (pageReady) {
+                      installNativeHooks();
+                      applyPendingAutoFinish();
+                  }
+                  webView.postDelayed(this::beginPermissionFlow, 500);
+              }
+
+              @Override
+              public void onBackPressed() {
+                  if (webView.canGoBack()) {
+                      webView.goBack();
+                  } else {
+                      super.onBackPressed();
+                  }
+              }
+
+              @Override
+              protected void onDestroy() {
+                  try {
+                      unregisterReceiver(autoFinishReceiver);
+                  } catch (Exception ignored) {
+                  }
+                  super.onDestroy();
+              }
+          }
+          EOF
+
+          cat > android-cotizador/app/src/main/java/ar/com/pioca/cotizador/BackgroundLocationService.java <<'EOF'
+          package ar.com.pioca.cotizador;
+
+          import android.Manifest;
+          import android.app.Notification;
+          import android.app.NotificationChannel;
+          import android.app.NotificationManager;
+          import android.app.PendingIntent;
+          import android.app.Service;
+          import android.content.Intent;
+          import android.content.SharedPreferences;
+          import android.content.pm.PackageManager;
+          import android.location.Location;
+          import android.location.LocationListener;
+          import android.location.LocationManager;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.os.IBinder;
+
+          public class BackgroundLocationService extends Service implements LocationListener {
+
+              private static final String CHANNEL_ID = "pioca_cotizador_servicio";
+              private static final int NOTIFICATION_ID = 1717;
+              private static final long CHECK_MS = 120000L;
+              private static final double STOP_DISTANCE_M = 200.0;
+              private static final double MAX_ACCURACY_M = 100.0;
+
+              private LocationManager locationManager;
+              private long startAt;
+              private double startLat;
+              private double startLng;
+              private double startAccuracy;
+              private long lastCheckAt = 0L;
+
+              @Override
+              public void onCreate() {
+                  super.onCreate();
+                  createChannel();
+              }
+
+              @Override
+              public int onStartCommand(Intent intent, int flags, int startId) {
+                  SharedPreferences p = getSharedPreferences("native_tracking", MODE_PRIVATE);
+
+                  if (intent != null && intent.hasExtra("startAt")) {
+                      startAt = intent.getLongExtra("startAt", 0L);
+                      startLat = intent.getDoubleExtra("lat", Double.NaN);
+                      startLng = intent.getDoubleExtra("lng", Double.NaN);
+                      startAccuracy = intent.getDoubleExtra("accuracy", 100.0);
+                  } else if (p.getBoolean("tracking_active", false)) {
+                      startAt = p.getLong("startAt", 0L);
+                      startLat = Double.longBitsToDouble(p.getLong("lat_bits", 0L));
+                      startLng = Double.longBitsToDouble(p.getLong("lng_bits", 0L));
+                      startAccuracy = Double.longBitsToDouble(p.getLong("accuracy_bits", 0L));
+                  } else {
+                      stopSelf();
+                      return START_NOT_STICKY;
+                  }
+
+                  startForeground(NOTIFICATION_ID, buildNotification());
+                  beginLocationUpdates();
+                  return START_STICKY;
+              }
+
+              private void createChannel() {
+                  if (Build.VERSION.SDK_INT >= 26) {
+                      NotificationChannel c = new NotificationChannel(
+                              CHANNEL_ID,
+                              "Servicio activo piOca",
+                              NotificationManager.IMPORTANCE_LOW
+                      );
+                      c.setDescription("Control de ubicación mientras hay un servicio activo");
+                      NotificationManager nm = getSystemService(NotificationManager.class);
+                      if (nm != null) nm.createNotificationChannel(c);
+                  }
+              }
+
+              private Notification buildNotification() {
+                  Intent open = new Intent(this, MainActivity.class);
+                  open.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+
+                  PendingIntent pi = PendingIntent.getActivity(
+                          this,
+                          0,
+                          open,
+                          PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+                  );
+
+                  return new Notification.Builder(this, CHANNEL_ID)
+                          .setSmallIcon(R.mipmap.ic_launcher)
+                          .setContentTitle("piOca Cotizador · servicio activo")
+                          .setContentText("Controlando ubicación para finalizar el servicio al alejarte.")
+                          .setContentIntent(pi)
+                          .setOngoing(true)
+                          .setCategory(Notification.CATEGORY_SERVICE)
+                          .build();
+              }
+
+              private void beginLocationUpdates() {
+                  if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                          != PackageManager.PERMISSION_GRANTED) {
+                      stopSelf();
+                      return;
+                  }
+
+                  if (locationManager == null) {
+                      locationManager = (LocationManager) getSystemService(LOCATION_SERVICE);
+                  }
+
+                  if (locationManager == null) return;
+
+                  try {
+                      if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                          locationManager.requestLocationUpdates(
+                                  LocationManager.GPS_PROVIDER,
+                                  CHECK_MS,
+                                  20f,
+                                  this
+                          );
+                      }
+                  } catch (Exception ignored) {
+                  }
+
+                  try {
+                      if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                          locationManager.requestLocationUpdates(
+                                  LocationManager.NETWORK_PROVIDER,
+                                  CHECK_MS,
+                                  20f,
+                                  this
+                          );
+                      }
+                  } catch (Exception ignored) {
+                  }
+              }
+
+              @Override
+              public void onLocationChanged(Location location) {
+                  if (location == null) return;
+
+                  long now = System.currentTimeMillis();
+                  if (lastCheckAt > 0 && now - lastCheckAt < CHECK_MS - 5000L) return;
+                  lastCheckAt = now;
+
+                  double currentAccuracy = location.hasAccuracy()
+                          ? Math.max(0.0, location.getAccuracy())
+                          : MAX_ACCURACY_M;
+
+                  double safeStartAccuracy = Math.max(0.0, startAccuracy);
+
+                  if (safeStartAccuracy > MAX_ACCURACY_M || currentAccuracy > MAX_ACCURACY_M) {
+                      return;
+                  }
+
+                  double rawDistance = distanceMeters(
+                          startLat,
+                          startLng,
+                          location.getLatitude(),
+                          location.getLongitude()
+                  );
+
+                  double conservativeDistance =
+                          rawDistance
+                                  - Math.min(safeStartAccuracy, MAX_ACCURACY_M)
+                                  - Math.min(currentAccuracy, MAX_ACCURACY_M);
+
+                  if (conservativeDistance >= STOP_DISTANCE_M) {
+                      saveAutoFinish(location, rawDistance);
+                      sendBroadcast(
+                              new Intent(MainActivity.ACTION_AUTO_FINISH)
+                                      .setPackage(getPackageName())
+                      );
+                      stopSelf();
+                  }
+              }
+
+              private void saveAutoFinish(Location location, double rawDistance) {
+                  long endAt = System.currentTimeMillis();
+
+                  getSharedPreferences("native_tracking", MODE_PRIVATE)
+                          .edit()
+                          .putBoolean("tracking_active", false)
+                          .putBoolean("pending_auto_finish", true)
+                          .putLong("finish_startAt", startAt)
+                          .putLong("finish_endAt", endAt)
+                          .putLong("finish_lat_bits", Double.doubleToRawLongBits(location.getLatitude()))
+                          .putLong("finish_lng_bits", Double.doubleToRawLongBits(location.getLongitude()))
+                          .putLong("finish_accuracy_bits", Double.doubleToRawLongBits(location.getAccuracy()))
+                          .putLong("finish_distance_bits", Double.doubleToRawLongBits(rawDistance))
+                          .apply();
+              }
+
+              private static double distanceMeters(
+                      double lat1,
+                      double lon1,
+                      double lat2,
+                      double lon2) {
+
+                  double earth = 6371000.0;
+                  double p1 = Math.toRadians(lat1);
+                  double p2 = Math.toRadians(lat2);
+                  double dp = Math.toRadians(lat2 - lat1);
+                  double dl = Math.toRadians(lon2 - lon1);
+
+                  double a =
+                          Math.sin(dp / 2.0) * Math.sin(dp / 2.0)
+                                  + Math.cos(p1) * Math.cos(p2)
+                                  * Math.sin(dl / 2.0) * Math.sin(dl / 2.0);
+
+                  double c = 2.0 * Math.atan2(Math.sqrt(a), Math.sqrt(1.0 - a));
+                  return earth * c;
+              }
+
+              @Override
+              public void onProviderEnabled(String provider) {
+              }
+
+              @Override
+              public void onProviderDisabled(String provider) {
+              }
+
+              @Override
+              public void onStatusChanged(String provider, int status, Bundle extras) {
+              }
+
+              @Override
+              public IBinder onBind(Intent intent) {
+                  return null;
+              }
+
+              @Override
+              public void onDestroy() {
+                  if (locationManager != null) {
+                      try {
+                          locationManager.removeUpdates(this);
+                      } catch (Exception ignored) {
+                      }
+                  }
+                  super.onDestroy();
+              }
+          }
+          EOF
+
+          python3 -m pip install --quiet pillow
+          python3 - <<'PY'
+          from PIL import Image
+          from pathlib import Path
+
+          src = Image.open('icon-cotizador-pioca.png').convert('RGBA')
+          if src.width != src.height:
+              raise SystemExit('ERROR: icon-cotizador-pioca.png debe ser cuadrado')
+
+          sizes = {
+              'mipmap-mdpi': 48,
+              'mipmap-hdpi': 72,
+              'mipmap-xhdpi': 96,
+              'mipmap-xxhdpi': 144,
+              'mipmap-xxxhdpi': 192,
+          }
+
+          for folder, size in sizes.items():
+              out = Path('android-cotizador/app/src/main/res') / folder / 'ic_launcher.png'
+              src.resize((size, size), Image.Resampling.LANCZOS).save(out, 'PNG')
+          PY
+
+      - name: Preparar firma
+        env:
+          COTIZADOR_KEYSTORE_B64: ${{ secrets.COTIZADOR_KEYSTORE_B64 }}
+        run: |
+          set -e
+          printf '%s' "$COTIZADOR_KEYSTORE_B64" | base64 --decode > android-cotizador/pioca-cotizador-release.jks
+          test -s android-cotizador/pioca-cotizador-release.jks
+
+      - name: Compilar APK release firmada
+        working-directory: android-cotizador
+        env:
+          COTIZADOR_KEYSTORE_PATH: ../pioca-cotizador-release.jks
+          COTIZADOR_KEYSTORE_PASS: ${{ secrets.COTIZADOR_KEYSTORE_PASS }}
+        run: |
+          gradle :app:assembleRelease --no-daemon
+
+      - name: Preparar APK final
+        run: |
+          cp android-cotizador/app/build/outputs/apk/release/app-release.apk piOca-Cotizador-V1.apk
+
+      - name: Subir APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: piOca-Cotizador-APK-V1
+          path: piOca-Cotizador-V1.apk
+          retention-days: 90
