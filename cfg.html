@@ -80,34 +80,62 @@
 .clientRatesBlock .muted{
   margin-bottom:14px;
 }
-.rateTableWrap{
+.rateTables{
+  display:grid;
+  gap:14px;
   margin-top:16px;
-  overflow-x:auto;
+}
+.rateTableGroup h4{
+  margin:0 0 7px;
+  color:#26384c;
+  font-size:14px;
+}
+.rateTableWrap{
+  overflow:hidden;
   border:1px solid #e3e7ed;
   border-radius:12px;
 }
 .rateTable{
   width:100%;
   border-collapse:collapse;
-  min-width:520px;
+  table-layout:fixed;
   background:#fff;
 }
 .rateTable th,
 .rateTable td{
-  padding:10px 12px;
+  padding:10px 9px;
   text-align:left;
   border-bottom:1px solid #edf0f4;
-  font-size:13px;
-  white-space:nowrap;
+  font-size:12.5px;
 }
 .rateTable th{
   background:#f7f9fb;
   color:#526173;
-  font-size:12px;
+  font-size:11.5px;
 }
 .rateTable tr:last-child td{border-bottom:0}
-.rateTable td:not(:first-child),
-.rateTable th:not(:first-child){text-align:right}
+.rateTable td:nth-child(2),
+.rateTable td:nth-child(3),
+.rateTable th:nth-child(2),
+.rateTable th:nth-child(3){
+  text-align:right;
+}
+.rateTable th:first-child,
+.rateTable td:first-child{
+  width:44%;
+}
+.rateTable th:nth-child(2),
+.rateTable td:nth-child(2){
+  width:22%;
+}
+.rateTable th:nth-child(3),
+.rateTable td:nth-child(3){
+  width:34%;
+}
+.ratePct{
+  font-weight:700;
+  color:#526173;
+}
 .rateHint{
   margin-top:10px;
   font-size:12px;
@@ -189,39 +217,72 @@
         <input id="industriaPct" type="number" min="0" step="0.01" inputmode="decimal" value="68">
         <div class="updatedAt" id="industriaPctUpdated">Última actualización: sin registro</div>
 
-        <div class="rateTableWrap">
-          <table class="rateTable" aria-label="Tarifas resultantes por tipo de cliente">
-            <thead>
-              <tr>
-                <th>Tipo de cliente</th>
-                <th>Traslado / h</th>
-                <th>Mano de obra / h</th>
-                <th>Km</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Particular</td>
-                <td id="rateParticularTravel">—</td>
-                <td id="rateParticularLabor">—</td>
-                <td id="rateParticularKm">—</td>
-              </tr>
-              <tr>
-                <td id="rateConsorcioLabel">Consorcio / edificio</td>
-                <td id="rateConsorcioTravel">—</td>
-                <td id="rateConsorcioLabor">—</td>
-                <td id="rateConsorcioKm">—</td>
-              </tr>
-              <tr>
-                <td id="rateIndustriaLabel">Industria</td>
-                <td id="rateIndustriaTravel">—</td>
-                <td id="rateIndustriaLabor">—</td>
-                <td id="rateIndustriaKm">—</td>
-              </tr>
-            </tbody>
-          </table>
+        <div class="rateTables">
+          <div class="rateTableGroup">
+            <h4>Hora de traslado</h4>
+            <div class="rateTableWrap">
+              <table class="rateTable" aria-label="Hora de traslado por tipo de cliente">
+                <thead>
+                  <tr>
+                    <th>Tipo de cliente</th>
+                    <th>Aumento</th>
+                    <th>Valor / h</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Particular</td>
+                    <td class="ratePct">Base</td>
+                    <td id="rateParticularTravel">—</td>
+                  </tr>
+                  <tr>
+                    <td>Consorcio / edificio</td>
+                    <td class="ratePct" id="rateConsorcioTravelPct">—</td>
+                    <td id="rateConsorcioTravel">—</td>
+                  </tr>
+                  <tr>
+                    <td>Industria</td>
+                    <td class="ratePct" id="rateIndustriaTravelPct">—</td>
+                    <td id="rateIndustriaTravel">—</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="rateTableGroup">
+            <h4>Hora de mano de obra</h4>
+            <div class="rateTableWrap">
+              <table class="rateTable" aria-label="Hora de mano de obra por tipo de cliente">
+                <thead>
+                  <tr>
+                    <th>Tipo de cliente</th>
+                    <th>Aumento</th>
+                    <th>Valor / h</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Particular</td>
+                    <td class="ratePct">Base</td>
+                    <td id="rateParticularLabor">—</td>
+                  </tr>
+                  <tr>
+                    <td>Consorcio / edificio</td>
+                    <td class="ratePct" id="rateConsorcioLaborPct">—</td>
+                    <td id="rateConsorcioLabor">—</td>
+                  </tr>
+                  <tr>
+                    <td>Industria</td>
+                    <td class="ratePct" id="rateIndustriaLaborPct">—</td>
+                    <td id="rateIndustriaLabor">—</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
-        <div class="rateHint">Los valores se recalculan automáticamente al cambiar las tarifas base o los porcentajes.</div>
+        <div class="rateHint">Los valores se recalculan automáticamente al cambiar las tarifas base o los porcentajes. El valor por kilómetro no cambia.</div>
       </div>
 
       <button class="verde" id="save">GUARDAR CONFIGURACIÓN</button>
@@ -308,17 +369,20 @@ function renderClientRates(){
 
   $('rateParticularTravel').textContent=money(travel);
   $('rateParticularLabor').textContent=money(labor);
-  $('rateParticularKm').textContent=money(km);
 
-  $('rateConsorcioLabel').textContent='Consorcio / edificio'+percentLabel(consorcioPct);
+  const consorcioPctText=percentLabel(consorcioPct).trim() || '—';
+  const industriaPctText=percentLabel(industriaPct).trim() || '—';
+
+  $('rateConsorcioTravelPct').textContent=consorcioPctText;
+  $('rateConsorcioLaborPct').textContent=consorcioPctText;
+  $('rateIndustriaTravelPct').textContent=industriaPctText;
+  $('rateIndustriaLaborPct').textContent=industriaPctText;
+
   $('rateConsorcioTravel').textContent=money(travel===null || consorcioFactor===null ? null : travel*consorcioFactor);
   $('rateConsorcioLabor').textContent=money(labor===null || consorcioFactor===null ? null : labor*consorcioFactor);
-  $('rateConsorcioKm').textContent=money(km);
 
-  $('rateIndustriaLabel').textContent='Industria'+percentLabel(industriaPct);
   $('rateIndustriaTravel').textContent=money(travel===null || industriaFactor===null ? null : travel*industriaFactor);
   $('rateIndustriaLabor').textContent=money(labor===null || industriaFactor===null ? null : labor*industriaFactor);
-  $('rateIndustriaKm').textContent=money(km);
 }
 
 ['km','travel','labor','consorcioPct','industriaPct'].forEach(id=>{
