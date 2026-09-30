@@ -62,6 +62,11 @@
   background:#fff3f3;
   color:#a12626;
 }
+.updatedAt{
+  margin-top:5px;
+  font-size:12px;
+  color:#7a8797;
+}
 </style>
 </head>
 <body>
@@ -105,18 +110,23 @@
 
       <label for="km">Valor por kilómetro</label>
       <input id="km" type="number" min="0" step="0.01" inputmode="decimal" placeholder="$">
+      <div class="updatedAt" id="kmUpdated">Última actualización: sin registro</div>
 
       <label for="travel">Valor hora de traslado</label>
       <input id="travel" type="number" min="0" step="0.01" inputmode="decimal" placeholder="$">
+      <div class="updatedAt" id="travelUpdated">Última actualización: sin registro</div>
 
       <label for="labor">Valor hora de mano de obra</label>
       <input id="labor" type="number" min="0" step="0.01" inputmode="decimal" placeholder="$">
+      <div class="updatedAt" id="laborUpdated">Última actualización: sin registro</div>
 
       <label for="toll">Valor promedio de peaje</label>
       <input id="toll" type="number" min="0" step="0.01" inputmode="decimal" placeholder="$">
+      <div class="updatedAt" id="tollUpdated">Última actualización: sin registro</div>
 
       <label for="iva">IVA (%)</label>
       <input id="iva" type="number" min="0" step="0.01" inputmode="decimal" value="21">
+      <div class="updatedAt" id="ivaUpdated">Última actualización: sin registro</div>
 
       <button class="verde" id="save">GUARDAR CONFIGURACIÓN</button>
       <div class="status ok hidden" id="saved">Configuración guardada.</div>
@@ -129,7 +139,34 @@
 
 <script>
 const ids=['base','km','travel','labor','toll','iva'];
+const trackedIds=['km','travel','labor','toll','iva'];
 const key='r17_cfg_v1';
+
+function formatUpdateDate(iso){
+  if(!iso) return 'sin registro';
+
+  const d=new Date(iso);
+  if(Number.isNaN(d.getTime())) return 'sin registro';
+
+  return new Intl.DateTimeFormat('es-AR',{
+    day:'2-digit',
+    month:'2-digit',
+    year:'numeric',
+    hour:'2-digit',
+    minute:'2-digit'
+  }).format(d);
+}
+
+function renderUpdateDates(v){
+  const updates=(v && v.updatedAt) || {};
+
+  trackedIds.forEach(id=>{
+    const el=$(id+'Updated');
+    if(!el) return;
+
+    el.textContent='Última actualización: '+formatUpdateDate(updates[id]);
+  });
+}
 
 const ROUTER_URL='https://apxrmkdegjnblkbyjsbp.supabase.co/functions/v1/r17-router';
 const SUPABASE_PUBLISHABLE='sb_publishable_htgEX8HiRGAjpCVhPw1gfg_tOPxkJoI';
@@ -278,7 +315,11 @@ function load(){
       selectedBasePlaceId=v.basePlaceId;
       $('baseConfirmed').classList.remove('hidden');
     }
-  }catch(e){}
+
+    renderUpdateDates(v);
+  }catch(e){
+    renderUpdateDates({});
+  }
 }
 
 $('save').onclick=()=>{
@@ -296,16 +337,43 @@ $('save').onclick=()=>{
     return;
   }
 
+  let previous={};
+
+  try{
+    previous=JSON.parse(localStorage.getItem(key)||'{}');
+  }catch(e){
+    previous={};
+  }
+
   const data={};
+  const now=new Date().toISOString();
+  const updatedAt={...(previous.updatedAt||{})};
 
   ids.forEach(id=>{
     data[id]=$(id).value;
   });
 
+  trackedIds.forEach(id=>{
+    const oldValue=
+      previous[id]===undefined || previous[id]===null
+        ? ''
+        : String(previous[id]);
+
+    const newValue=String(data[id]??'');
+
+    // Si nunca hubo fecha, este guardado queda como referencia inicial.
+    // Después la fecha cambia únicamente cuando cambia el valor.
+    if(!updatedAt[id] || oldValue!==newValue){
+      updatedAt[id]=now;
+    }
+  });
+
+  data.updatedAt=updatedAt;
   data.basePlaceId=selectedBasePlaceId;
 
   localStorage.setItem(key,JSON.stringify(data));
 
+  renderUpdateDates(data);
   $('saveError').classList.add('hidden');
 
   const box=$('saved');
