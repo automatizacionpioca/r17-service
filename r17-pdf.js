@@ -326,7 +326,7 @@
     doc.setFont('helvetica','bold');
     doc.setFontSize(12.5);
     setText(BLUE);
-    doc.text(money(r.visitRounded),pageW-margin,y,{align:'right'});
+    doc.text(money(r.visitRounded),pageW-margin-7,y,{align:'right'});
 
     y+=7;
 
@@ -365,7 +365,7 @@
 
         doc.setFont('helvetica','bold');
         setText(DARK);
-        doc.text(money(total),pageW-margin,y,{align:'right'});
+        doc.text(money(total),pageW-margin-7,y,{align:'right'});
 
         y+=Math.max(10,detailLines.length*6.2+4);
         divider();
