@@ -184,7 +184,7 @@
 </main>
 
 <script src="https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js"></script>
-<script src="r17-pdf.js"></script>
+<script src="r17-pdf.js?v=20260929-4"></script>
 <script>
 const HISTORY_URL='https://apxrmkdegjnblkbyjsbp.supabase.co/functions/v1/r17-history';
 const SUPABASE_PUBLISHABLE='sb_publishable_htgEX8HiRGAjpCVhPw1gfg_tOPxkJoI';
@@ -336,11 +336,15 @@ function cardHtml(item){
         <div class="pdfActions">
           <button class="pdfBtn" type="button"
             onclick="openHistoryPdf('${escapeHtml(item.id)}')">
-            Abrir PDF
+            Ver PDF
           </button>
           <button class="pdfBtn share" type="button"
             onclick="shareHistoryPdf('${escapeHtml(item.id)}')">
             Compartir PDF
+          </button>
+          <button class="pdfBtn" style="grid-column:1/-1" type="button"
+            onclick="copyHistoryMessage(this)">
+            Copiar mensaje
           </button>
         </div>
 
@@ -370,11 +374,25 @@ async function shareHistoryPdf(id){
   const item=historyById.get(id);
   if(!item) return;
   try{
-    await PiocaPDF.sharePdf(item);
+    const result=await PiocaPDF.sharePdf(item);
+    if(result && result.messageCopied){
+      alert('PDF compartido. El mensaje quedó copiado por si WhatsApp no lo agrega automáticamente.');
+    }
   }catch(e){
     if(e && e.name==='AbortError') return;
     alert('No se pudo compartir el PDF: '+(e.message||String(e)));
   }
+}
+
+async function copyHistoryMessage(btn){
+  const original=btn.textContent;
+  try{
+    const ok=await PiocaPDF.copyMessage();
+    btn.textContent=ok?'Mensaje copiado':'No se pudo copiar';
+  }catch(e){
+    btn.textContent='No se pudo copiar';
+  }
+  setTimeout(()=>btn.textContent=original,1800);
 }
 
 function toggleInternal(id,btn){
