@@ -143,6 +143,13 @@
   display:grid;
   gap:10px;
 }
+.customerTypeChoiceButtons{
+  display:grid;
+  gap:10px;
+}
+.customerTypeChoiceButtons button{
+  margin:0;
+}
 </style>
 </head>
 <body>
@@ -272,25 +279,35 @@
         </div>
 
         <div class="previewLine">
+          <span>Tipo de cliente</span>
+          <b id="previewCustomerType">—</b>
+        </div>
+
+        <div class="previewLine">
           <span>Tiempo empleado en el servicio</span>
           <b id="previewTime">—</b>
         </div>
 
         <div id="previewItems" class="previewItems hidden"></div>
 
-        <div class="previewLine">
+        <div class="previewLine" id="previewCashRow">
           <span>Precio efectivo</span>
           <b class="previewTotal" id="previewCash">—</b>
         </div>
 
-        <div class="invoiceBox">
-          <div class="previewLine">
-            <span>Precio por transferencia + IVA</span>
+        <div class="invoiceBox" id="previewInvoiceBox">
+          <div class="previewLine" id="previewTransferRow">
+            <span id="previewTransferLabel">Precio por transferencia + IVA</span>
             <b class="invoiceBase" id="previewPlusIva">—</b>
           </div>
 
-          <div class="previewLine">
-            <span>Precio final IVA incluido</span>
+          <div class="previewLine hidden" id="previewIvaAmountRow">
+            <span id="previewIvaAmountLabel">IVA</span>
+            <b class="invoiceBase" id="previewIvaAmount">—</b>
+          </div>
+
+          <div class="previewLine" id="previewIvaIncludedRow">
+            <span id="previewIvaIncludedLabel">Precio final IVA incluido</span>
             <b class="previewTotal" id="previewIvaIncluded">—</b>
           </div>
         </div>
@@ -317,11 +334,23 @@
 
 <div id="travelChoiceOverlay" class="travelChoiceOverlay hidden">
   <div class="travelChoiceBox">
-    <h3>¿Computar también el tiempo de traslado de regreso?</h3>
+    <h3>¿Cobrar también el tiempo de traslado de regreso?</h3>
     <p>Los kilómetros se calculan siempre ida y vuelta. Esta opción modifica únicamente el tiempo de traslado.</p>
     <div class="travelChoiceButtons">
       <button class="azul" id="travelRoundTripBtn" type="button">SÍ, IDA Y VUELTA</button>
       <button class="claro" id="travelOneWayBtn" type="button">NO, SOLO IDA</button>
+    </div>
+  </div>
+</div>
+
+<div id="customerTypeOverlay" class="travelChoiceOverlay hidden">
+  <div class="travelChoiceBox">
+    <h3>Tipo de cliente</h3>
+    <p>Seleccioná el tipo de cliente para aplicar la tarifa correspondiente.</p>
+    <div class="customerTypeChoiceButtons">
+      <button class="azul" id="customerParticularBtn" type="button">PARTICULAR</button>
+      <button class="claro" id="customerConsorcioBtn" type="button">CONSORCIO / EDIFICIO</button>
+      <button class="oscuro" id="customerIndustriaBtn" type="button">INDUSTRIA</button>
     </div>
   </div>
 </div>
@@ -426,6 +455,7 @@ function resetCalculationBoard(options={}){
   $('calcCard').classList.add('hidden');
 
   $('travelChoiceOverlay').classList.add('hidden');
+  $('customerTypeOverlay').classList.add('hidden');
 }
 
 function readConfig(){
@@ -617,6 +647,36 @@ function configReady(cfg){
 }
 
 
+function normalizeCustomerType(value){
+  const type=String(value||'').trim().toLowerCase();
+  if(type==='consorcio' || type==='edificio') return 'consorcio';
+  if(type==='industria') return 'industria';
+  return 'particular';
+}
+
+function customerTypeLabel(value){
+  const type=normalizeCustomerType(value);
+  if(type==='consorcio') return 'Consorcio / edificio';
+  if(type==='industria') return 'Industria';
+  return 'Particular';
+}
+
+function configuredCustomerPercent(cfg,type){
+  const normalized=normalizeCustomerType(type);
+
+  if(normalized==='consorcio'){
+    const raw=cfg ? cfg.consorcioPct : undefined;
+    return raw===undefined || String(raw).trim()==='' ? 25 : Math.max(0,num(raw));
+  }
+
+  if(normalized==='industria'){
+    const raw=cfg ? cfg.industriaPct : undefined;
+    return raw===undefined || String(raw).trim()==='' ? 68 : Math.max(0,num(raw));
+  }
+
+  return 0;
+}
+
 function askReturnTravelTime(){
   return new Promise(resolve=>{
     const overlay=$('travelChoiceOverlay');
@@ -639,6 +699,39 @@ function askReturnTravelTime(){
     no.onclick=()=>{
       cleanup();
       resolve(false);
+    };
+  });
+}
+
+function askCustomerType(){
+  return new Promise(resolve=>{
+    const overlay=$('customerTypeOverlay');
+    const particular=$('customerParticularBtn');
+    const consorcio=$('customerConsorcioBtn');
+    const industria=$('customerIndustriaBtn');
+
+    overlay.classList.remove('hidden');
+
+    const cleanup=()=>{
+      particular.onclick=null;
+      consorcio.onclick=null;
+      industria.onclick=null;
+      overlay.classList.add('hidden');
+    };
+
+    particular.onclick=()=>{
+      cleanup();
+      resolve('particular');
+    };
+
+    consorcio.onclick=()=>{
+      cleanup();
+      resolve('consorcio');
+    };
+
+    industria.onclick=()=>{
+      cleanup();
+      resolve('industria');
     };
   });
 }
@@ -681,9 +774,20 @@ function calculateAmounts(){
     throw new Error('Cargá al menos un accesorio o repuesto, o seleccioná No.');
   }
 
+  const customerType=normalizeCustomerType(currentContext.customerType);
+  const customerSurchargePercent=configuredCustomerPercent(cfg,customerType);
+  const customerRateFactor=1+(customerSurchargePercent/100);
+
+  // El recargo por tipo de cliente se aplica únicamente al valor hora de
+  // traslado y al valor hora de mano de obra. Km, peajes y repuestos no cambian.
+  const baseTravelRate=num(cfg.travel);
+  const baseLaborRate=num(cfg.labor);
+  const effectiveTravelRate=baseTravelRate*customerRateFactor;
+  const effectiveLaborRate=baseLaborRate*customerRateFactor;
+
   const kmCost=routeKm*num(cfg.km);
-  const travelCost=(travelMinutes/60)*num(cfg.travel);
-  const laborCost=(laborMinutes/60)*num(cfg.labor);
+  const travelCost=(travelMinutes/60)*effectiveTravelRate;
+  const laborCost=(laborMinutes/60)*effectiveLaborRate;
   const tollCost=tollCount*num(cfg.toll);
   const partsCost=items.reduce((sum,item)=>sum+(num(item.qty)*num(item.price)),0);
 
@@ -707,6 +811,14 @@ function calculateAmounts(){
     travelMinutes,
     includeReturnTravelTime,
     laborMinutes,
+    customerType,
+    customerTypeLabel:customerTypeLabel(customerType),
+    customerSurchargePercent,
+    customerRateFactor,
+    baseTravelRate,
+    baseLaborRate,
+    effectiveTravelRate,
+    effectiveLaborRate,
     tollCount,
     items,
     kmCost,
@@ -739,10 +851,37 @@ function renderCommercialPreview(calc){
       ? serviceAddressForHistory()
       : 'Ubicación registrada');
 
+  $('previewCustomerType').textContent=calc.customerTypeLabel;
   $('previewTime').textContent=minutesText(calc.laborMinutes + calc.travelMinutes);
   $('previewCash').textContent=money(calc.cashRounded);
   $('previewPlusIva').textContent=money(calc.transferBase)+' + IVA';
+  $('previewIvaAmountLabel').textContent='IVA ('+calc.ivaPercent+'%)';
+  $('previewIvaAmount').textContent=money(calc.ivaAmount);
   $('previewIvaIncluded').textContent=money(calc.ivaIncluded);
+
+  const cashRow=$('previewCashRow');
+  const transferRow=$('previewTransferRow');
+  const ivaAmountRow=$('previewIvaAmountRow');
+
+  cashRow.classList.add('hidden');
+  transferRow.classList.add('hidden');
+  ivaAmountRow.classList.add('hidden');
+
+  if(calc.customerType==='particular'){
+    cashRow.classList.remove('hidden');
+    transferRow.classList.remove('hidden');
+    $('previewTransferLabel').textContent='Precio por transferencia + IVA';
+    $('previewPlusIva').textContent=money(calc.transferBase)+' + IVA';
+    $('previewIvaIncludedLabel').textContent='Precio final IVA incluido';
+  }else if(calc.customerType==='consorcio'){
+    $('previewIvaIncludedLabel').textContent='Total final IVA incluido';
+  }else{
+    transferRow.classList.remove('hidden');
+    ivaAmountRow.classList.remove('hidden');
+    $('previewTransferLabel').textContent='Subtotal facturado';
+    $('previewPlusIva').textContent=money(calc.transferBase);
+    $('previewIvaIncludedLabel').textContent='Total con IVA';
+  }
 
   const itemsBox=$('previewItems');
   itemsBox.innerHTML='';
@@ -1185,6 +1324,7 @@ $('continueService').onclick=async()=>{
   }
 
   const includeReturnTravelTime=await askReturnTravelTime();
+  const customerType=await askCustomerType();
 
   box.classList.remove('hidden');
   box.textContent='Calculando ruta con Google…';
@@ -1204,6 +1344,7 @@ $('continueService').onclick=async()=>{
     currentContext={
       mode:'service',
       includeReturnTravelTime,
+      customerType,
       customerAddress:
         (st && st.address)
           ? st.address
@@ -1320,6 +1461,7 @@ $('quoteAddress').onclick=async()=>{
   }
 
   const includeReturnTravelTime=await askReturnTravelTime();
+  const customerType=await askCustomerType();
 
   box.classList.remove('hidden');
   box.textContent='Calculando ruta con Google…';
@@ -1339,6 +1481,7 @@ $('quoteAddress').onclick=async()=>{
     currentContext={
       mode:'quote',
       includeReturnTravelTime,
+      customerType,
       customerAddress:customerAddress,
       customerPlaceId:selectedCustomerPlaceId
     };
@@ -1499,8 +1642,8 @@ function issuedPayload(calc){
     items:calc.items,
 
     rate_km:num(cfg.km),
-    rate_travel_hour:num(cfg.travel),
-    rate_labor_hour:num(cfg.labor),
+    rate_travel_hour:calc.effectiveTravelRate,
+    rate_labor_hour:calc.effectiveLaborRate,
     rate_toll:num(cfg.toll),
     iva_percent:calc.ivaPercent,
 
@@ -1535,6 +1678,9 @@ function issuedPayload(calc){
       total_employed_minutes:calc.laborMinutes+calc.travelMinutes,
       billed_travel_minutes:calc.travelMinutes,
       return_travel_time_computed:calc.includeReturnTravelTime,
+      customer_type:calc.customerType,
+      customer_type_label:calc.customerTypeLabel,
+      customer_surcharge_percent:calc.customerSurchargePercent,
       toll_count:calc.tollCount,
       items:calc.items,
       prices:{
@@ -1554,8 +1700,11 @@ function issuedPayload(calc){
       },
       rates:{
         km:num(cfg.km),
-        travel_hour:num(cfg.travel),
-        labor_hour:num(cfg.labor),
+        travel_hour:calc.effectiveTravelRate,
+        labor_hour:calc.effectiveLaborRate,
+        travel_hour_base:calc.baseTravelRate,
+        labor_hour_base:calc.baseLaborRate,
+        customer_surcharge_percent:calc.customerSurchargePercent,
         toll:num(cfg.toll)
       }
     }
