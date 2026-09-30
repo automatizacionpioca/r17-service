@@ -135,7 +135,7 @@
 
     <div class="card" id="serviceCard">
       <h2>Servicio en domicilio</h2>
-      <p>Usalo cuando llegás al cliente. Guarda ubicación y mide automáticamente el tiempo de trabajo.</p>
+      <p>Usalo cuando llegás al cliente. Guarda hora, GPS y dirección. El tiempo se reconstruye aunque el teléfono se bloquee.</p>
 
       <div id="idleBox">
         <button class="verde" id="startService">INICIAR SERVICIO</button>
@@ -146,11 +146,13 @@
         <div class="status ok">Servicio en curso</div>
         <div class="timer" id="timer">00:00:00</div>
         <div class="muted" id="startedAt" style="text-align:center"></div>
+        <div class="muted" id="runningLocation" style="text-align:center;margin-top:6px"></div>
+        <div class="muted" style="text-align:center;margin-top:4px;font-size:12px">Control automático de alejamiento cada 2 min · aprox. 200 m</div>
         <button class="rojo" id="finishService">FINALIZAR SERVICIO</button>
       </div>
 
       <div id="finishedBox" class="hidden">
-        <div class="status ok">Servicio finalizado correctamente.</div>
+        <div class="status ok" id="finishedStatus">Servicio finalizado correctamente.</div>
         <div class="kpi">
           <span>Tiempo de mano de obra registrado</span>
           <b id="workedTime">—</b>
@@ -279,6 +281,9 @@
 <script src="r17-pdf.js"></script>
 <script>
 const SERVICE_KEY='r17_active_v1';
+const AUTO_CHECK_MS=120000;
+const AUTO_STOP_DISTANCE_M=200;
+const AUTO_MAX_ACCURACY_M=100;
 const CFG_KEY='r17_cfg_v1';
 const ROUTER_URL='https://apxrmkdegjnblkbyjsbp.supabase.co/functions/v1/r17-router';
 const ISSUE_URL='https://apxrmkdegjnblkbyjsbp.supabase.co/functions/v1/r17-issue';
@@ -589,6 +594,8 @@ function showRoute(route){
 }
 
 let timerInt=null;
+let autoCheckInt=null;
+let autoCheckBusy=false;
 
 function fmtElapsed(ms){
   const s=Math.max(0,Math.floor(ms/1000));
@@ -605,6 +612,176 @@ function humanMinutes(ms){
   if(h) return h+' h';
   return m+' min';
 }
+
+function stopAutoMonitor(){
+  if(autoCheckInt){
+    clearInterval(autoCheckInt);
+    autoCheckInt=null;
+  }
+}
+
+function distanceMeters(lat1,lng1,lat2,lng2){
+  const R=6371000;
+  const toRad=v=>v*Math.PI/180;
+  const p1=toRad(lat1);
+  const p2=toRad(lat2);
+  const dp=toRad(lat2-lat1);
+  const dl=toRad(lng2-lng1);
+
+  const a=
+    Math.sin(dp/2)*Math.sin(dp/2)+
+    Math.cos(p1)*Math.cos(p2)*
+    Math.sin(dl/2)*Math.sin(dl/2);
+
+  return 2*R*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+async function reverseGeocode(lat,lng){
+  const response=await fetch(ROUTER_URL,{
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'apikey':SUPABASE_PUBLISHABLE,
+      'Authorization':'Bearer '+SUPABASE_PUBLISHABLE
+    },
+    body:JSON.stringify({
+      action:'reverse_geocode',
+      lat:Number(lat),
+      lng:Number(lng)
+    })
+  });
+
+  let data=null;
+  try{
+    data=await response.json();
+  }catch(e){
+    throw new Error('La búsqueda de dirección respondió con un formato inválido.');
+  }
+
+  if(!response.ok || !data.ok){
+    const detail=data && data.detail ? ' · '+JSON.stringify(data.detail) : '';
+    throw new Error((data && data.error ? data.error : 'No se pudo obtener la dirección')+detail);
+  }
+
+  return data;
+}
+
+async function enrichServiceAddress(startAt,lat,lng){
+  if(lat==null || lng==null) return;
+
+  try{
+    const geo=await reverseGeocode(lat,lng);
+    const current=readState();
+
+    if(!current || current.startAt!==startAt) return;
+
+    current.address=geo.address||current.address||null;
+    current.placeId=geo.placeId||current.placeId||null;
+    current.locationType=geo.locationType||null;
+    writeState(current);
+    render();
+  }catch(e){
+    const current=readState();
+    if(!current || current.startAt!==startAt) return;
+    current.addressError=e.message||String(e);
+    writeState(current);
+    render();
+  }
+}
+
+function finishServiceState(st,opts={}){
+  if(!st || st.status!=='running') return;
+
+  st.status='finished';
+  st.endAt=Date.now();
+
+  if(opts.auto){
+    st.autoFinished=true;
+    st.autoFinishDistanceM=Number(opts.distanceM)||0;
+    st.autoFinishDetectedAt=Date.now();
+
+    if(opts.position){
+      st.autoFinishLat=opts.position.coords.latitude;
+      st.autoFinishLng=opts.position.coords.longitude;
+      st.autoFinishAccuracy=opts.position.coords.accuracy;
+    }
+  }
+
+  writeState(st);
+  stopAutoMonitor();
+  render();
+}
+
+async function autoLocationCheck(force=false){
+  if(autoCheckBusy) return;
+
+  const st=readState();
+  if(!st || st.status!=='running' || st.lat==null || st.lng==null) return;
+  if(!navigator.geolocation) return;
+
+  // Evita chequeos duplicados demasiado seguidos al volver de segundo plano.
+  const now=Date.now();
+  if(!force && st.lastAutoCheckAt && now-st.lastAutoCheckAt<AUTO_CHECK_MS-5000) return;
+
+  autoCheckBusy=true;
+
+  try{
+    const pos=await new Promise((resolve,reject)=>{
+      navigator.geolocation.getCurrentPosition(
+        resolve,
+        reject,
+        {enableHighAccuracy:true,timeout:15000,maximumAge:30000}
+      );
+    });
+
+    const current=readState();
+    if(!current || current.status!=='running' || current.startAt!==st.startAt) return;
+
+    const rawDistance=distanceMeters(
+      Number(current.lat),
+      Number(current.lng),
+      Number(pos.coords.latitude),
+      Number(pos.coords.longitude)
+    );
+
+    const startAccuracy=Math.max(0,Number(current.accuracy)||0);
+    const currentAccuracy=Math.max(0,Number(pos.coords.accuracy)||0);
+
+    current.lastAutoCheckAt=Date.now();
+    current.lastAutoDistanceM=rawDistance;
+    current.lastAutoAccuracyM=currentAccuracy;
+    writeState(current);
+
+    // Solo finaliza si ambas lecturas tienen precisión razonable.
+    // Restamos el margen de error de ambas lecturas para evitar falsos positivos.
+    const conservativeDistance=
+      rawDistance-
+      Math.min(startAccuracy,AUTO_MAX_ACCURACY_M)-
+      Math.min(currentAccuracy,AUTO_MAX_ACCURACY_M);
+
+    const reliable=
+      startAccuracy<=AUTO_MAX_ACCURACY_M &&
+      currentAccuracy<=AUTO_MAX_ACCURACY_M;
+
+    if(reliable && conservativeDistance>=AUTO_STOP_DISTANCE_M){
+      finishServiceState(current,{
+        auto:true,
+        distanceM:rawDistance,
+        position:pos
+      });
+    }
+  }catch(e){
+    // Si una lectura falla, no interrumpimos el servicio.
+  }finally{
+    autoCheckBusy=false;
+  }
+}
+
+function startAutoMonitor(){
+  stopAutoMonitor();
+  autoCheckInt=setInterval(()=>autoLocationCheck(false),AUTO_CHECK_MS);
+}
+
 function readState(){
   try{return JSON.parse(localStorage.getItem(SERVICE_KEY)||'null')}catch(e){return null}
 }
@@ -619,25 +796,47 @@ function showIdle(){
   $('runningBox').classList.add('hidden');
   $('finishedBox').classList.add('hidden');
   if(timerInt) clearInterval(timerInt);
+  stopAutoMonitor();
 }
 function showRunning(st){
   $('idleBox').classList.add('hidden');
   $('runningBox').classList.remove('hidden');
   $('finishedBox').classList.add('hidden');
   $('startedAt').textContent='Iniciado: '+new Date(st.startAt).toLocaleString('es-AR');
+
+  if(st.address){
+    $('runningLocation').textContent='Ubicación: '+st.address;
+  }else if(st.lat!=null){
+    $('runningLocation').textContent='Ubicación guardada · obteniendo dirección…';
+  }else{
+    $('runningLocation').textContent='Ubicación no disponible';
+  }
+
   const tick=()=>$('timer').textContent=fmtElapsed(Date.now()-st.startAt);
   tick();
   if(timerInt) clearInterval(timerInt);
   timerInt=setInterval(tick,1000);
+  startAutoMonitor();
 }
 function showFinished(st){
   $('idleBox').classList.add('hidden');
   $('runningBox').classList.add('hidden');
   $('finishedBox').classList.remove('hidden');
   if(timerInt) clearInterval(timerInt);
+  stopAutoMonitor();
+
   $('workedTime').textContent=humanMinutes(st.endAt-st.startAt);
+
+  if(st.autoFinished){
+    $('finishedStatus').textContent=
+      'Servicio finalizado automáticamente al detectar alejamiento del domicilio.';
+  }else{
+    $('finishedStatus').textContent='Servicio finalizado correctamente.';
+  }
+
   $('savedLocation').textContent=
-    st.lat!=null ? st.lat.toFixed(5)+', '+st.lng.toFixed(5) : 'Ubicación no disponible';
+    st.address ||
+    (st.lat!=null ? st.lat.toFixed(5)+', '+st.lng.toFixed(5) : 'Ubicación no disponible');
 }
 function render(){
   const st=readState();
@@ -656,17 +855,32 @@ $('startService').onclick=()=>{
   $('geoInfo').classList.remove('hidden');
   $('geoInfo').textContent='Obteniendo ubicación…';
 
+  // La hora se guarda en el instante del toque, no después de esperar al GPS.
+  const startAt=Date.now();
+
   const start=(pos)=>{
     const st={
       status:'running',
-      startAt:Date.now(),
+      startAt:startAt,
       lat:pos?pos.coords.latitude:null,
       lng:pos?pos.coords.longitude:null,
-      accuracy:pos?pos.coords.accuracy:null
+      accuracy:pos?pos.coords.accuracy:null,
+      address:null,
+      placeId:null,
+      autoFinished:false
     };
+
     writeState(st);
     $('geoInfo').classList.add('hidden');
     render();
+
+    if(pos){
+      enrichServiceAddress(
+        startAt,
+        pos.coords.latitude,
+        pos.coords.longitude
+      );
+    }
   };
 
   if(!navigator.geolocation){
@@ -687,11 +901,7 @@ $('startService').onclick=()=>{
 
 $('finishService').onclick=()=>{
   const st=readState();
-  if(!st || st.status!=='running') return;
-  st.status='finished';
-  st.endAt=Date.now();
-  writeState(st);
-  render();
+  finishServiceState(st,{auto:false});
 };
 
 $('continueService').onclick=async()=>{
@@ -916,6 +1126,7 @@ $('addItemBtn').onclick=()=>addItem();
 
 function serviceAddressForHistory(){
   const st=readState();
+  if(st && st.address) return st.address;
   if(st && st.lat!=null && st.lng!=null){
     return 'GPS '+Number(st.lat).toFixed(6)+', '+Number(st.lng).toFixed(6);
   }
@@ -937,7 +1148,7 @@ function issuedPayload(calc){
     customer_place_id:
       currentContext.mode==='quote'
         ? (currentContext.customerPlaceId || null)
-        : null,
+        : (st && st.placeId ? st.placeId : null),
 
     service_lat:
       currentContext.mode==='service' && st && st.lat!=null
@@ -994,7 +1205,7 @@ function issuedPayload(calc){
       customer_place_id:
         currentContext.mode==='quote'
           ? (currentContext.customerPlaceId||null)
-          : null,
+          : (st && st.placeId ? st.placeId : null),
       one_way_km:num(currentRoute.one_way?.distance_km),
       round_trip_km:num(currentRoute.round_trip?.distance_km),
       one_way_minutes:num(currentRoute.one_way?.duration_minutes),
@@ -1126,7 +1337,36 @@ $('previewBtn').onclick=()=>{
   }
 };
 
+
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'){
+    const st=readState();
+    if(st && st.status==='running'){
+      setTimeout(()=>autoLocationCheck(true),500);
+    }
+  }
+});
+
+window.addEventListener('pageshow',()=>{
+  const st=readState();
+  if(st && st.status==='running' && Date.now()-st.startAt>30000){
+    setTimeout(()=>autoLocationCheck(true),700);
+  }
+});
+
+window.addEventListener('focus',()=>{
+  const st=readState();
+  if(st && st.status==='running' && Date.now()-st.startAt>30000){
+    setTimeout(()=>autoLocationCheck(true),700);
+  }
+});
+
 render();
+
+const initialService=readState();
+if(initialService && initialService.status==='running' && Date.now()-initialService.startAt>30000){
+  setTimeout(()=>autoLocationCheck(true),900);
+}
 </script>
 </body>
 </html>
