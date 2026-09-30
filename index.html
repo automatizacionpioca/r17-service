@@ -199,7 +199,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" id="quoteCard">
       <h2>Cotización anticipada</h2>
       <p>Para calcular un service desde casa antes de ir al domicilio.</p>
 
@@ -306,6 +306,8 @@
           Para enviarlo, usá COMPARTIR PDF. El visor puede cambiar el nombre del archivo.
         </div>
       </div>
+
+      <button class="rojo" id="discardCalculation" type="button" style="margin-top:14px">DESCARTAR SERVICIO</button>
     </div>
 
   </section>
@@ -325,12 +327,13 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js"></script>
-<script src="r17-pdf.js?v=20260929-5"></script>
+<script src="r17-pdf.js?v=20260929-6"></script>
 <script>
 const SERVICE_KEY='r17_active_v1';
 const AUTO_CHECK_MS=120000;
 const AUTO_STOP_DISTANCE_M=200;
 const AUTO_MAX_ACCURACY_M=100;
+const TRANSFER_SURCHARGE_PERCENT=12;
 const CFG_KEY='r17_cfg_v1';
 const ROUTER_URL='https://apxrmkdegjnblkbyjsbp.supabase.co/functions/v1/r17-router';
 const ISSUE_URL='https://apxrmkdegjnblkbyjsbp.supabase.co/functions/v1/r17-issue';
@@ -346,6 +349,84 @@ let autocompleteSeq=0;
 
 const $=id=>document.getElementById(id);
 
+function setModeVisibility(mode){
+  if(mode==='service'){
+    $('serviceCard').classList.remove('hidden');
+    $('quoteCard').classList.add('hidden');
+    return;
+  }
+
+  if(mode==='quote'){
+    $('serviceCard').classList.add('hidden');
+    $('quoteCard').classList.remove('hidden');
+    return;
+  }
+
+  $('serviceCard').classList.remove('hidden');
+  $('quoteCard').classList.remove('hidden');
+}
+
+function resetCalculationBoard(options={}){
+  const clearAddress=options.clearAddress!==false;
+
+  currentRoute=null;
+  currentContext=null;
+  lastPreviewCalc=null;
+  lastIssuedRecord=null;
+
+  if(autocompleteTimer){
+    clearTimeout(autocompleteTimer);
+    autocompleteTimer=null;
+  }
+  autocompleteSeq++;
+
+  selectedCustomerPlaceId=null;
+  selectedCustomerText='';
+
+  if(clearAddress){
+    $('address').value='';
+  }
+  $('addressSuggestions').innerHTML='';
+  $('addressSuggestions').classList.add('hidden');
+  $('addressConfirmed').classList.add('hidden');
+  $('addressInfo').classList.add('hidden');
+  $('addressInfo').textContent='';
+
+  // La mano de obra estimada pertenece únicamente a Cotización anticipada.
+  $('estimatedMinutes').value='';
+
+  // Campos compartidos entre ambos modos.
+  $('tolls').value='0';
+  $('parts').value='no';
+  $('partsBox').classList.add('hidden');
+  $('itemsContainer').innerHTML='';
+  itemSeq=0;
+
+  $('routeSummary').classList.add('hidden');
+  $('routeKm').textContent='—';
+  $('routeMinutes').textContent='—';
+
+  $('preview').classList.add('hidden');
+  $('previewItems').innerHTML='';
+  $('previewError').classList.add('hidden');
+  $('previewError').textContent='';
+
+  $('issueBtn').classList.add('hidden');
+  $('issueBtn').disabled=false;
+  $('issueBtn').textContent='EMITIR';
+  $('issueStatus').classList.add('hidden');
+  $('issueStatus').textContent='';
+  $('pdfActions').classList.add('hidden');
+
+  $('serviceRouteState').classList.add('hidden');
+  $('serviceRouteState').textContent='';
+
+  $('quoteAddress').disabled=false;
+  $('continueService').disabled=false;
+  $('calcCard').classList.add('hidden');
+
+  $('travelChoiceOverlay').classList.add('hidden');
+}
 
 function readConfig(){
   try{
@@ -612,8 +693,14 @@ function calculateAmounts(){
   const cashRounded=visitLaborRounded+partsCost;
 
   const ivaPercent=(cfg.iva===undefined || String(cfg.iva).trim()==='') ? 21 : num(cfg.iva);
-  const ivaAmount=cashRounded*(ivaPercent/100);
-  const ivaIncluded=cashRounded+ivaAmount;
+
+  // Precio efectivo: se conserva exactamente como estaba.
+  // Transferencia: efectivo + 12% de recargo comercial, y sobre ese subtotal se aplica IVA.
+  const transferSurchargePercent=TRANSFER_SURCHARGE_PERCENT;
+  const transferSurchargeAmount=cashRounded*(transferSurchargePercent/100);
+  const transferBase=cashRounded+transferSurchargeAmount;
+  const ivaAmount=transferBase*(ivaPercent/100);
+  const ivaIncluded=transferBase+ivaAmount;
 
   return {
     routeKm,
@@ -631,6 +718,9 @@ function calculateAmounts(){
     visitLaborRounded,
     totalCashRaw,
     cashRounded,
+    transferSurchargePercent,
+    transferSurchargeAmount,
+    transferBase,
     ivaPercent,
     ivaAmount,
     ivaIncluded
@@ -651,7 +741,7 @@ function renderCommercialPreview(calc){
 
   $('previewTime').textContent=minutesText(calc.laborMinutes + calc.travelMinutes);
   $('previewCash').textContent=money(calc.cashRounded);
-  $('previewPlusIva').textContent=money(calc.cashRounded)+' + IVA';
+  $('previewPlusIva').textContent=money(calc.transferBase)+' + IVA';
   $('previewIvaIncluded').textContent=money(calc.ivaIncluded);
 
   const itemsBox=$('previewItems');
@@ -992,18 +1082,31 @@ function showFinished(st){
 }
 function render(){
   const st=readState();
-  if(!st){showIdle();return;}
-  if(st.status==='running') showRunning(st);
-  else if(st.status==='finished') showFinished(st);
-  else showIdle();
+
+  if(!st){
+    showIdle();
+    if(!currentContext || currentContext.mode!=='quote'){
+      setModeVisibility(null);
+    }
+    return;
+  }
+
+  if(st.status==='running'){
+    setModeVisibility('service');
+    showRunning(st);
+  }else if(st.status==='finished'){
+    setModeVisibility('service');
+    showFinished(st);
+  }else{
+    showIdle();
+    setModeVisibility(null);
+  }
 }
 
 $('startService').onclick=()=>{
-  currentRoute=null;
-  currentContext=null;
-  $('preview').classList.add('hidden');
-  $('issueBtn').classList.add('hidden');
-  $('issueStatus').classList.add('hidden');
+  resetCalculationBoard();
+  setModeVisibility('service');
+
   $('geoInfo').classList.remove('hidden');
   $('geoInfo').textContent='Obteniendo ubicación…';
 
@@ -1106,6 +1209,7 @@ $('continueService').onclick=async()=>{
           ? st.address
           : serviceAddressForHistory()
     };
+    setModeVisibility('service');
     showRoute(route);
   }catch(e){
     box.textContent='No se pudo calcular: '+(e.message||String(e));
@@ -1117,7 +1221,8 @@ $('continueService').onclick=async()=>{
 $('newService').onclick=()=>{
   if(confirm('¿Descartar este servicio y comenzar uno nuevo?')){
     clearState();
-    $('calcCard').classList.add('hidden');
+    resetCalculationBoard();
+    setModeVisibility(null);
     render();
   }
 };
@@ -1237,12 +1342,35 @@ $('quoteAddress').onclick=async()=>{
       customerAddress:customerAddress,
       customerPlaceId:selectedCustomerPlaceId
     };
+    setModeVisibility('quote');
     showRoute(route);
   }catch(e){
     box.textContent='No se pudo calcular: '+(e.message||String(e));
   }finally{
     $('quoteAddress').disabled=false;
   }
+};
+
+$('discardCalculation').onclick=()=>{
+  const st=readState();
+  const mode=currentContext && currentContext.mode
+    ? currentContext.mode
+    : (st ? 'service' : 'quote');
+
+  const question=mode==='service'
+    ? '¿Descartar este servicio y limpiar todos los datos cargados?'
+    : '¿Descartar esta cotización y limpiar todos los datos cargados?';
+
+  if(!confirm(question)) return;
+
+  if(mode==='service'){
+    clearState();
+  }
+
+  resetCalculationBoard();
+  setModeVisibility(null);
+  render();
+  window.scrollTo({top:0,behavior:'smooth'});
 };
 
 let itemSeq=0;
@@ -1388,7 +1516,7 @@ function issuedPayload(calc){
     iva_amount:calc.ivaAmount,
     total_invoice:calc.ivaIncluded,
 
-    pdf_version:'r17-pdf-v1',
+    pdf_version:'r17-pdf-v2-transfer12',
     pdf_name:'piOca_Resumen_Servicio.pdf',
 
     snapshot:{
@@ -1417,6 +1545,9 @@ function issuedPayload(calc){
         parts:calc.partsCost,
         total_cash_raw:calc.totalCashRaw,
         total_cash_rounded:calc.cashRounded,
+        transfer_surcharge_percent:calc.transferSurchargePercent,
+        transfer_surcharge_amount:calc.transferSurchargeAmount,
+        transfer_base:calc.transferBase,
         iva_percent:calc.ivaPercent,
         iva_amount:calc.ivaAmount,
         total_invoice:calc.ivaIncluded
