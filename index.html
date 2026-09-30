@@ -152,8 +152,8 @@
       <img src="https://automatizacionpioca.github.io/pioca-gps/logo-pioca.png" alt="piOca®" style="width:100%;height:auto;display:block;">
     </div>
     <div>
-      <h1>Servicio técnico</h1>
-      <p>Cálculo interno de intervención y emisión.</p>
+      <h1>Cotizador de service y reparaciones</h1>
+      <p>Cotizador automático y emisión de reportes.</p>
     </div>
   </header>
 
@@ -327,7 +327,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js"></script>
-<script src="r17-pdf.js?v=20260929-6"></script>
+<script src="r17-pdf.js?v=20260929-7"></script>
 <script>
 const SERVICE_KEY='r17_active_v1';
 const AUTO_CHECK_MS=120000;
@@ -1516,7 +1516,7 @@ function issuedPayload(calc){
     iva_amount:calc.ivaAmount,
     total_invoice:calc.ivaIncluded,
 
-    pdf_version:'r17-pdf-v2-transfer12',
+    pdf_version:'r17-pdf-v3-large-green',
     pdf_name:'piOca_Resumen_Servicio.pdf',
 
     snapshot:{
