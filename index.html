@@ -111,6 +111,38 @@
   font-weight:600;
   font-size:12px;
 }
+.travelChoiceOverlay{
+  position:fixed;
+  inset:0;
+  z-index:9999;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:20px;
+  background:rgba(20,32,46,.48);
+}
+.travelChoiceBox{
+  width:min(460px,100%);
+  background:#fff;
+  border-radius:20px;
+  padding:22px;
+  box-shadow:0 18px 55px rgba(0,0,0,.22);
+  border:1px solid #dce4ed;
+}
+.travelChoiceBox h3{
+  margin:0 0 10px;
+  color:#26384c;
+  font-size:21px;
+}
+.travelChoiceBox p{
+  margin:0 0 18px;
+  color:#68788b;
+  line-height:1.45;
+}
+.travelChoiceButtons{
+  display:grid;
+  gap:10px;
+}
 </style>
 </head>
 <body>
@@ -197,7 +229,7 @@
             <b id="routeKm">—</b>
           </div>
           <div class="kpi">
-            <span>Tiempo total de traslado</span>
+            <span>Tiempo de traslado computado</span>
             <b id="routeMinutes">—</b>
           </div>
         </div>
@@ -280,6 +312,17 @@
 
   <div class="footerNote">piOca® · uso interno</div>
 </main>
+
+<div id="travelChoiceOverlay" class="travelChoiceOverlay hidden">
+  <div class="travelChoiceBox">
+    <h3>¿Computar también el tiempo de traslado de regreso?</h3>
+    <p>Los kilómetros se calculan siempre ida y vuelta. Esta opción modifica únicamente el tiempo de traslado.</p>
+    <div class="travelChoiceButtons">
+      <button class="azul" id="travelRoundTripBtn" type="button">SÍ, IDA Y VUELTA</button>
+      <button class="claro" id="travelOneWayBtn" type="button">NO, SOLO IDA</button>
+    </div>
+  </div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js"></script>
 <script src="r17-pdf.js?v=20260929-5"></script>
@@ -492,6 +535,33 @@ function configReady(cfg){
   );
 }
 
+
+function askReturnTravelTime(){
+  return new Promise(resolve=>{
+    const overlay=$('travelChoiceOverlay');
+    const yes=$('travelRoundTripBtn');
+    const no=$('travelOneWayBtn');
+
+    overlay.classList.remove('hidden');
+
+    const cleanup=()=>{
+      yes.onclick=null;
+      no.onclick=null;
+      overlay.classList.add('hidden');
+    };
+
+    yes.onclick=()=>{
+      cleanup();
+      resolve(true);
+    };
+
+    no.onclick=()=>{
+      cleanup();
+      resolve(false);
+    };
+  });
+}
+
 function calculateAmounts(){
   const cfg=readConfig();
 
@@ -504,7 +574,13 @@ function calculateAmounts(){
   }
 
   const routeKm=num(currentRoute.round_trip?.distance_km);
-  const travelMinutes=num(currentRoute.round_trip?.duration_minutes);
+
+  const includeReturnTravelTime=
+    currentContext.includeReturnTravelTime!==false;
+
+  const travelMinutes=includeReturnTravelTime
+    ? num(currentRoute.round_trip?.duration_minutes)
+    : num(currentRoute.one_way?.duration_minutes);
 
   let laborMinutes=0;
 
@@ -542,6 +618,7 @@ function calculateAmounts(){
   return {
     routeKm,
     travelMinutes,
+    includeReturnTravelTime,
     laborMinutes,
     tollCount,
     items,
@@ -615,8 +692,16 @@ function renderCommercialPreview(calc){
 
 function showRoute(route){
   currentRoute=route;
+
+  const includeReturnTravelTime=
+    !currentContext || currentContext.includeReturnTravelTime!==false;
+
+  const billedTravelMinutes=includeReturnTravelTime
+    ? route.round_trip.duration_minutes
+    : route.one_way.duration_minutes;
+
   $('routeKm').textContent=route.round_trip.distance_km.toFixed(1)+' km';
-  $('routeMinutes').textContent=Math.round(route.round_trip.duration_minutes)+' min';
+  $('routeMinutes').textContent=Math.round(billedTravelMinutes)+' min';
   $('routeSummary').classList.remove('hidden');
   $('calcCard').classList.remove('hidden');
   $('calcCard').scrollIntoView({behavior:'smooth',block:'start'});
@@ -996,6 +1081,8 @@ $('continueService').onclick=async()=>{
     return;
   }
 
+  const includeReturnTravelTime=await askReturnTravelTime();
+
   box.classList.remove('hidden');
   box.textContent='Calculando ruta con Google…';
   $('continueService').disabled=true;
@@ -1013,6 +1100,7 @@ $('continueService').onclick=async()=>{
     box.textContent='Ruta calculada correctamente.';
     currentContext={
       mode:'service',
+      includeReturnTravelTime,
       customerAddress:
         (st && st.address)
           ? st.address
@@ -1126,6 +1214,8 @@ $('quoteAddress').onclick=async()=>{
     return;
   }
 
+  const includeReturnTravelTime=await askReturnTravelTime();
+
   box.classList.remove('hidden');
   box.textContent='Calculando ruta con Google…';
   $('quoteAddress').disabled=true;
@@ -1143,6 +1233,7 @@ $('quoteAddress').onclick=async()=>{
     box.textContent='Ruta calculada correctamente.';
     currentContext={
       mode:'quote',
+      includeReturnTravelTime,
       customerAddress:customerAddress,
       customerPlaceId:selectedCustomerPlaceId
     };
@@ -1314,9 +1405,13 @@ function issuedPayload(calc){
       round_trip_minutes:num(currentRoute.round_trip?.duration_minutes),
       labor_minutes:calc.laborMinutes,
       total_employed_minutes:calc.laborMinutes+calc.travelMinutes,
+      billed_travel_minutes:calc.travelMinutes,
+      return_travel_time_computed:calc.includeReturnTravelTime,
       toll_count:calc.tollCount,
       items:calc.items,
       prices:{
+        return_travel_time_computed:calc.includeReturnTravelTime,
+        billed_travel_minutes:calc.travelMinutes,
         visit_labor_raw:calc.visitLaborRaw,
         visit_labor_rounded:calc.visitLaborRounded,
         parts:calc.partsCost,
