@@ -1,1015 +1,1727 @@
-name: Compilar piOca Cotizador APK
-
-on:
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-
-    env:
-      ANDROID_HOME: /usr/local/lib/android/sdk
-      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Java 17
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Preparar Android SDK 35
-        shell: bash
-        run: |
-          set -e
-
-          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-
-          if [ ! -x "$SDKMANAGER" ]; then
-            SDKMANAGER="$(find "$ANDROID_SDK_ROOT/cmdline-tools" -type f -path '*/bin/sdkmanager' 2>/dev/null | sort -V | tail -n 1)"
-          fi
-
-          if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
-            echo "ERROR: No se encontró sdkmanager dentro de $ANDROID_SDK_ROOT"
-            find "$ANDROID_SDK_ROOT" -maxdepth 4 -type f -name sdkmanager -print 2>/dev/null || true
-            exit 1
-          fi
-
-          echo "Usando sdkmanager: $SDKMANAGER"
-          "$SDKMANAGER" --version
-
-          yes | "$SDKMANAGER" --licenses >/dev/null || true
-
-          "$SDKMANAGER"             "platform-tools"             "platforms;android-35"             "build-tools;35.0.0"
-
-          test -d "$ANDROID_SDK_ROOT/platforms/android-35"
-          test -d "$ANDROID_SDK_ROOT/build-tools/35.0.0"
-
-          echo "Android SDK 35 listo."
-
-      - name: Gradle 8.9
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.9"
-
-      - name: Validar archivos y firma
-        env:
-          COTIZADOR_KEYSTORE_B64: ${{ secrets.COTIZADOR_KEYSTORE_B64 }}
-          COTIZADOR_KEYSTORE_PASS: ${{ secrets.COTIZADOR_KEYSTORE_PASS }}
-        run: |
-          set -e
-          test -f icon-cotizador-pioca.png || { echo "Falta icon-cotizador-pioca.png en la raíz del repositorio"; exit 1; }
-          test -n "$COTIZADOR_KEYSTORE_B64" || { echo "Falta el secret COTIZADOR_KEYSTORE_B64"; exit 1; }
-          test -n "$COTIZADOR_KEYSTORE_PASS" || { echo "Falta el secret COTIZADOR_KEYSTORE_PASS"; exit 1; }
-
-      - name: Crear proyecto Android
-        shell: bash
-        run: |
-          set -e
-
-          rm -rf android-cotizador
-          mkdir -p android-cotizador/app/src/main/java/ar/com/pioca/cotizador
-          mkdir -p android-cotizador/app/src/main/res/xml
-          mkdir -p android-cotizador/app/src/main/res/values
-          mkdir -p android-cotizador/app/src/main/res/mipmap-mdpi
-          mkdir -p android-cotizador/app/src/main/res/mipmap-hdpi
-          mkdir -p android-cotizador/app/src/main/res/mipmap-xhdpi
-          mkdir -p android-cotizador/app/src/main/res/mipmap-xxhdpi
-          mkdir -p android-cotizador/app/src/main/res/mipmap-xxxhdpi
-
-          cat > android-cotizador/settings.gradle <<'EOF'
-          pluginManagement {
-              repositories {
-                  google()
-                  mavenCentral()
-                  gradlePluginPortal()
-              }
-          }
-
-          dependencyResolutionManagement {
-              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-          }
-
-          rootProject.name = 'piOcaCotizador'
-          include ':app'
-          EOF
-
-          cat > android-cotizador/build.gradle <<'EOF'
-          plugins {
-              id 'com.android.application' version '8.7.3' apply false
-          }
-          EOF
-
-          cat > android-cotizador/gradle.properties <<'EOF'
-          android.useAndroidX=true
-          android.enableJetifier=true
-          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
-          EOF
-
-          cat > android-cotizador/app/build.gradle <<'EOF'
-          plugins {
-              id 'com.android.application'
-          }
-
-          android {
-              namespace 'ar.com.pioca.cotizador'
-              compileSdk 35
-
-              defaultConfig {
-                  applicationId 'ar.com.pioca.cotizador'
-                  minSdk 26
-                  targetSdk 35
-                  versionCode 1
-                  versionName '1.0'
-              }
-
-              signingConfigs {
-                  release {
-                      storeFile file(System.getenv('COTIZADOR_KEYSTORE_PATH'))
-                      storePassword System.getenv('COTIZADOR_KEYSTORE_PASS')
-                      keyAlias 'pioca'
-                      keyPassword System.getenv('COTIZADOR_KEYSTORE_PASS')
-                  }
-              }
-
-              buildTypes {
-                  release {
-                      minifyEnabled false
-                      shrinkResources false
-                      signingConfig signingConfigs.release
-                  }
-              }
-          }
-
-          dependencies {
-              implementation 'androidx.core:core:1.15.0'
-          }
-          EOF
-
-          cat > android-cotizador/app/src/main/res/values/strings.xml <<'EOF'
-          <resources>
-              <string name="app_name">piOca Cotizador</string>
-          </resources>
-          EOF
-
-          cat > android-cotizador/app/src/main/res/values/styles.xml <<'EOF'
-          <resources>
-              <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
-                  <item name="android:fontFamily">sans</item>
-                  <item name="android:windowActionModeOverlay">true</item>
-                  <item name="android:navigationBarColor">#FFFFFF</item>
-                  <item name="android:statusBarColor">#FFFFFF</item>
-                  <item name="android:windowLightStatusBar">true</item>
-              </style>
-          </resources>
-          EOF
-
-          cat > android-cotizador/app/src/main/res/xml/file_paths.xml <<'EOF'
-          <paths xmlns:android="http://schemas.android.com/apk/res/android">
-              <cache-path name="shared" path="shared/" />
-          </paths>
-          EOF
-
-          cat > android-cotizador/app/src/main/AndroidManifest.xml <<'EOF'
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-
-              <uses-permission android:name="android.permission.INTERNET" />
-              <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-              <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
-              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-              <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-
-              <application
-                  android:allowBackup="true"
-                  android:fullBackupContent="true"
-                  android:icon="@mipmap/ic_launcher"
-                  android:label="piOca Cotizador"
-                  android:supportsRtl="true"
-                  android:theme="@style/AppTheme"
-                  android:usesCleartextTraffic="false">
-
-                  <activity
-                      android:name=".MainActivity"
-                      android:exported="true"
-                      android:screenOrientation="portrait">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
-                      </intent-filter>
-                  </activity>
-
-                  <service
-                      android:name=".BackgroundLocationService"
-                      android:exported="false"
-                      android:foregroundServiceType="location"
-                      android:stopWithTask="false" />
-
-                  <provider
-                      android:name="androidx.core.content.FileProvider"
-                      android:authorities="ar.com.pioca.cotizador.fileprovider"
-                      android:exported="false"
-                      android:grantUriPermissions="true">
-                      <meta-data
-                          android:name="android.support.FILE_PROVIDER_PATHS"
-                          android:resource="@xml/file_paths" />
-                  </provider>
-
-              </application>
-          </manifest>
-          EOF
-
-          cat > android-cotizador/app/src/main/java/ar/com/pioca/cotizador/MainActivity.java <<'EOF'
-          package ar.com.pioca.cotizador;
-
-          import android.Manifest;
-          import android.app.Activity;
-          import android.app.AlertDialog;
-          import android.content.BroadcastReceiver;
-          import android.content.ClipData;
-          import android.content.Context;
-          import android.content.Intent;
-          import android.content.IntentFilter;
-          import android.content.SharedPreferences;
-          import android.content.pm.PackageManager;
-          import android.net.Uri;
-          import android.os.Build;
-          import android.os.Bundle;
-          import android.os.PowerManager;
-          import android.provider.Settings;
-          import android.util.Base64;
-          import android.webkit.GeolocationPermissions;
-          import android.webkit.JavascriptInterface;
-          import android.webkit.WebChromeClient;
-          import android.webkit.WebSettings;
-          import android.webkit.WebView;
-          import android.webkit.WebViewClient;
-          import android.widget.Toast;
-
-          import androidx.core.content.FileProvider;
-
-          import org.json.JSONObject;
-
-          import java.io.File;
-          import java.io.FileOutputStream;
-
-          public class MainActivity extends Activity {
-
-              private static final String APP_URL = "https://automatizacionpioca.github.io/r17-service/";
-              private static final String SERVICE_KEY = "r17_active_v1";
-              public static final String ACTION_AUTO_FINISH = "ar.com.pioca.cotizador.AUTO_FINISH";
-
-              private static final int REQ_LOCATION = 1001;
-              private static final int REQ_BACKGROUND = 1002;
-              private static final int REQ_NOTIFICATIONS = 1003;
-
-              private WebView webView;
-              private boolean pageReady = false;
-              private boolean backgroundDialogShown = false;
-              private boolean batteryDialogShown = false;
-              private GeolocationPermissions.Callback pendingGeoCallback;
-              private String pendingGeoOrigin;
-
-              private final BroadcastReceiver autoFinishReceiver = new BroadcastReceiver() {
-                  @Override
-                  public void onReceive(Context context, Intent intent) {
-                      applyPendingAutoFinish();
-                  }
-              };
-
-              @Override
-              protected void onCreate(Bundle savedInstanceState) {
-                  super.onCreate(savedInstanceState);
-
-                  webView = new WebView(this);
-                  setContentView(webView);
-
-                  WebSettings s = webView.getSettings();
-                  s.setJavaScriptEnabled(true);
-                  s.setDomStorageEnabled(true);
-                  s.setDatabaseEnabled(true);
-                  s.setGeolocationEnabled(true);
-                  s.setAllowFileAccess(false);
-                  s.setAllowContentAccess(true);
-                  s.setCacheMode(WebSettings.LOAD_DEFAULT);
-
-                  webView.addJavascriptInterface(new NativeBridge(), "AndroidCotizador");
-
-                  webView.setWebViewClient(new WebViewClient() {
-                      @Override
-                      public void onPageFinished(WebView view, String url) {
-                          super.onPageFinished(view, url);
-                          pageReady = true;
-                          installNativeHooks();
-                          applyPendingAutoFinish();
-                      }
-                  });
-
-                  webView.setWebChromeClient(new WebChromeClient() {
-                      @Override
-                      public void onGeolocationPermissionsShowPrompt(
-                              String origin,
-                              GeolocationPermissions.Callback callback) {
-
-                          if (hasFineLocation()) {
-                              callback.invoke(origin, true, false);
-                          } else {
-                              pendingGeoOrigin = origin;
-                              pendingGeoCallback = callback;
-                              requestLocationPermission();
-                          }
-                      }
-                  });
-
-                  if (Build.VERSION.SDK_INT >= 33) {
-                      registerReceiver(
-                              autoFinishReceiver,
-                              new IntentFilter(ACTION_AUTO_FINISH),
-                              Context.RECEIVER_NOT_EXPORTED
-                      );
-                  } else {
-                      registerReceiver(autoFinishReceiver, new IntentFilter(ACTION_AUTO_FINISH));
-                  }
-
-                  webView.loadUrl(APP_URL);
-                  webView.postDelayed(this::beginPermissionFlow, 800);
-              }
-
-              private boolean hasFineLocation() {
-                  return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
-                          == PackageManager.PERMISSION_GRANTED;
-              }
-
-              private boolean hasBackgroundLocation() {
-                  if (Build.VERSION.SDK_INT < 29) return true;
-                  return checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
-                          == PackageManager.PERMISSION_GRANTED;
-              }
-
-              private void requestLocationPermission() {
-                  requestPermissions(
-                          new String[]{
-                                  Manifest.permission.ACCESS_FINE_LOCATION,
-                                  Manifest.permission.ACCESS_COARSE_LOCATION
-                          },
-                          REQ_LOCATION
-                  );
-              }
-
-              private void beginPermissionFlow() {
-                  if (!hasFineLocation()) {
-                      requestLocationPermission();
-                      return;
-                  }
-
-                  if (Build.VERSION.SDK_INT >= 29 && !hasBackgroundLocation() && !backgroundDialogShown) {
-                      maybeAskBackgroundLocation();
-                      return;
-                  }
-
-                  if (Build.VERSION.SDK_INT >= 33 &&
-                          checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
-                                  != PackageManager.PERMISSION_GRANTED) {
-                      maybeAskNotifications();
-                      return;
-                  }
-
-                  maybeAskBatteryOptimization();
-              }
-
-              private void maybeAskBackgroundLocation() {
-                  if (Build.VERSION.SDK_INT < 29 || hasBackgroundLocation()) return;
-
-                  if (Build.VERSION.SDK_INT == 29) {
-                      requestPermissions(
-                              new String[]{Manifest.permission.ACCESS_BACKGROUND_LOCATION},
-                              REQ_BACKGROUND
-                      );
-                      return;
-                  }
-
-                  if (backgroundDialogShown) return;
-                  backgroundDialogShown = true;
-
-                  new AlertDialog.Builder(this)
-                          .setTitle("Permitir ubicación permanente")
-                          .setMessage(
-                                  "Para finalizar automáticamente un servicio aunque bloquees o cierres la app, " +
-                                  "habilitá Ubicación y elegí ‘Permitir todo el tiempo’."
-                          )
-                          .setPositiveButton("ABRIR AJUSTES", (d, which) -> {
-                              Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
-                              i.setData(Uri.parse("package:" + getPackageName()));
-                              startActivity(i);
-                          })
-                          .setNegativeButton("AHORA NO", null)
-                          .show();
-              }
-
-              private void maybeAskNotifications() {
-                  if (Build.VERSION.SDK_INT >= 33 &&
-                          checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
-                                  != PackageManager.PERMISSION_GRANTED) {
-                      requestPermissions(
-                              new String[]{Manifest.permission.POST_NOTIFICATIONS},
-                              REQ_NOTIFICATIONS
-                      );
-                  }
-              }
-
-              private void maybeAskBatteryOptimization() {
-                  if (batteryDialogShown) return;
-
-                  PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
-                  if (pm != null && pm.isIgnoringBatteryOptimizations(getPackageName())) return;
-
-                  batteryDialogShown = true;
-
-                  new AlertDialog.Builder(this)
-                          .setTitle("Permitir funcionamiento en segundo plano")
-                          .setMessage(
-                                  "Para que el control de ubicación siga activo con la pantalla bloqueada, " +
-                                  "conviene excluir piOca Cotizador del ahorro de batería."
-                          )
-                          .setPositiveButton("PERMITIR", (d, which) -> {
-                              try {
-                                  Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
-                                  i.setData(Uri.parse("package:" + getPackageName()));
-                                  startActivity(i);
-                              } catch (Exception e) {
-                                  Intent i = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
-                                  startActivity(i);
-                              }
-                          })
-                          .setNegativeButton("AHORA NO", null)
-                          .show();
-              }
-
-              @Override
-              public void onRequestPermissionsResult(
-                      int requestCode,
-                      String[] permissions,
-                      int[] grantResults) {
-
-                  super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-
-                  if (requestCode == REQ_LOCATION) {
-                      boolean granted = hasFineLocation();
-
-                      if (pendingGeoCallback != null && pendingGeoOrigin != null) {
-                          pendingGeoCallback.invoke(pendingGeoOrigin, granted, false);
-                          pendingGeoCallback = null;
-                          pendingGeoOrigin = null;
-                      }
-
-                      if (granted) {
-                          beginPermissionFlow();
-                      }
-                  } else if (requestCode == REQ_BACKGROUND || requestCode == REQ_NOTIFICATIONS) {
-                      beginPermissionFlow();
-                  }
-              }
-
-              private void installNativeHooks() {
-                  String js =
-                          "(function(){" +
-                          "try{" +
-                          "if(!window.__piocaNativeHook){" +
-                          "window.__piocaNativeHook=true;" +
-                          "var _set=Storage.prototype.setItem;" +
-                          "Storage.prototype.setItem=function(k,v){" +
-                          "var r=_set.apply(this,arguments);" +
-                          "try{if(this===localStorage&&k==='" + SERVICE_KEY + "'&&window.AndroidCotizador){AndroidCotizador.syncServiceState(String(v));}}catch(e){}" +
-                          "return r;};" +
-                          "var _remove=Storage.prototype.removeItem;" +
-                          "Storage.prototype.removeItem=function(k){" +
-                          "var r=_remove.apply(this,arguments);" +
-                          "try{if(this===localStorage&&k==='" + SERVICE_KEY + "'&&window.AndroidCotizador){AndroidCotizador.syncServiceState('');}}catch(e){}" +
-                          "return r;};" +
-                          "var nativeShare=function(data){return new Promise(function(resolve,reject){" +
-                          "try{" +
-                          "var f=data&&data.files&&data.files[0];" +
-                          "if(!f){reject(new Error('No hay archivo para compartir'));return;}" +
-                          "var reader=new FileReader();" +
-                          "reader.onload=function(){try{AndroidCotizador.sharePdf(String(reader.result),f.name||'piOca.pdf',(data&&data.text)||'');resolve();}catch(e){reject(e);}};" +
-                          "reader.onerror=function(){reject(reader.error||new Error('No se pudo leer el PDF'));};" +
-                          "reader.readAsDataURL(f);" +
-                          "}catch(e){reject(e);}" +
-                          "});};" +
-                          "try{Object.defineProperty(navigator,'share',{configurable:true,value:nativeShare});}catch(e){try{navigator.share=nativeShare;}catch(x){}}" +
-                          "var nativeCanShare=function(){return true;};" +
-                          "try{Object.defineProperty(navigator,'canShare',{configurable:true,value:nativeCanShare});}catch(e){try{navigator.canShare=nativeCanShare;}catch(x){}}" +
-                          "if(window.PiocaPDF&&!window.PiocaPDF.__nativeSharePatched){" +
-                          "window.PiocaPDF.__nativeSharePatched=true;" +
-                          "window.PiocaPDF.sharePdf=async function(record){" +
-                          "var blob=await window.PiocaPDF.build(record);" +
-                          "var name=window.PiocaPDF.fileName(record);" +
-                          "var msg=window.PiocaPDF.message||'';" +
-                          "try{if(window.PiocaPDF.copyMessage){await window.PiocaPDF.copyMessage();}}catch(e){}" +
-                          "return await new Promise(function(resolve,reject){" +
-                          "var reader=new FileReader();" +
-                          "reader.onload=function(){try{AndroidCotizador.sharePdf(String(reader.result),name,msg);resolve({shared:true,messageCopied:true,name:name});}catch(e){reject(e);}};" +
-                          "reader.onerror=function(){reject(reader.error||new Error('No se pudo leer el PDF'));};" +
-                          "reader.readAsDataURL(blob);" +
-                          "});" +
-                          "};" +
-                          "}" +
-                          "}" +
-                          "var cur=localStorage.getItem('" + SERVICE_KEY + "');" +
-                          "if(window.AndroidCotizador){AndroidCotizador.syncServiceState(cur||'');}" +
-                          "}catch(e){}" +
-                          "})();";
-
-                  webView.evaluateJavascript(js, null);
-              }
-
-              private void handleServiceState(String json) {
-                  try {
-                      if (json == null || json.trim().isEmpty()) {
-                          stopNativeTracking();
-                          return;
-                      }
-
-                      JSONObject o = new JSONObject(json);
-                      String status = o.optString("status", "");
-
-                      if (!"running".equals(status)) {
-                          stopNativeTracking();
-                          return;
-                      }
-
-                      if (!o.has("lat") || o.isNull("lat") || !o.has("lng") || o.isNull("lng")) {
-                          return;
-                      }
-
-                      long startAt = o.optLong("startAt", 0L);
-                      double lat = o.optDouble("lat", Double.NaN);
-                      double lng = o.optDouble("lng", Double.NaN);
-                      double accuracy = o.optDouble("accuracy", 100.0);
-
-                      if (startAt <= 0 || Double.isNaN(lat) || Double.isNaN(lng)) return;
-
-                      SharedPreferences p = getSharedPreferences("native_tracking", MODE_PRIVATE);
-                      p.edit()
-                              .putBoolean("tracking_active", true)
-                              .putLong("startAt", startAt)
-                              .putLong("lat_bits", Double.doubleToRawLongBits(lat))
-                              .putLong("lng_bits", Double.doubleToRawLongBits(lng))
-                              .putLong("accuracy_bits", Double.doubleToRawLongBits(accuracy))
-                              .apply();
-
-                      if (hasFineLocation()) {
-                          Intent i = new Intent(this, BackgroundLocationService.class);
-                          i.putExtra("startAt", startAt);
-                          i.putExtra("lat", lat);
-                          i.putExtra("lng", lng);
-                          i.putExtra("accuracy", accuracy);
-                          startForegroundService(i);
-                      }
-                  } catch (Exception ignored) {
-                  }
-              }
-
-              private void stopNativeTracking() {
-                  getSharedPreferences("native_tracking", MODE_PRIVATE)
-                          .edit()
-                          .putBoolean("tracking_active", false)
-                          .apply();
-
-                  stopService(new Intent(this, BackgroundLocationService.class));
-              }
-
-              private void applyPendingAutoFinish() {
-                  if (!pageReady) return;
-
-                  SharedPreferences p = getSharedPreferences("native_tracking", MODE_PRIVATE);
-                  if (!p.getBoolean("pending_auto_finish", false)) return;
-
-                  long startAt = p.getLong("finish_startAt", 0L);
-                  long endAt = p.getLong("finish_endAt", 0L);
-                  double lat = Double.longBitsToDouble(p.getLong("finish_lat_bits", 0L));
-                  double lng = Double.longBitsToDouble(p.getLong("finish_lng_bits", 0L));
-                  double accuracy = Double.longBitsToDouble(p.getLong("finish_accuracy_bits", 0L));
-                  double distance = Double.longBitsToDouble(p.getLong("finish_distance_bits", 0L));
-
-                  String js =
-                          "(function(){try{" +
-                          "var raw=localStorage.getItem('" + SERVICE_KEY + "');" +
-                          "if(!raw)return false;" +
-                          "var st=JSON.parse(raw);" +
-                          "if(st.status==='running'&&Number(st.startAt)===" + startAt + "){" +
-                          "st.status='finished';" +
-                          "st.endAt=" + endAt + ";" +
-                          "st.autoFinished=true;" +
-                          "st.autoFinishDistanceM=" + distance + ";" +
-                          "st.autoFinishDetectedAt=" + endAt + ";" +
-                          "st.autoFinishLat=" + lat + ";" +
-                          "st.autoFinishLng=" + lng + ";" +
-                          "st.autoFinishAccuracy=" + accuracy + ";" +
-                          "localStorage.setItem('" + SERVICE_KEY + "',JSON.stringify(st));" +
-                          "if(typeof render==='function'){render();}" +
-                          "if(typeof ensureServiceAddress==='function'){setTimeout(function(){ensureServiceAddress();},150);}" +
-                          "return true;}" +
-                          "return false;" +
-                          "}catch(e){return false;}})();";
-
-                  webView.evaluateJavascript(js, value ->
-                          p.edit().putBoolean("pending_auto_finish", false).apply()
-                  );
-              }
-
-              private File savePdfToCache(String dataUrl, String requestedName) throws Exception {
-                  int comma = dataUrl.indexOf(',');
-                  String b64 = comma >= 0 ? dataUrl.substring(comma + 1) : dataUrl;
-                  byte[] bytes = Base64.decode(b64, Base64.DEFAULT);
-
-                  String name = requestedName == null || requestedName.trim().isEmpty()
-                          ? "piOca-Cotizador.pdf"
-                          : requestedName;
-
-                  name = name.replaceAll("[\\\\/:*?\"<>|]", "_");
-                  if (!name.toLowerCase().endsWith(".pdf")) name += ".pdf";
-
-                  File dir = new File(getCacheDir(), "shared");
-                  if (!dir.exists()) dir.mkdirs();
-
-                  File file = new File(dir, name);
-                  try (FileOutputStream fos = new FileOutputStream(file)) {
-                      fos.write(bytes);
-                  }
-                  return file;
-              }
-
-              private void sharePdfNative(String dataUrl, String name, String message) {
-                  new Thread(() -> {
-                      try {
-                          File file = savePdfToCache(dataUrl, name);
-                          Uri uri = FileProvider.getUriForFile(
-                                  this,
-                                  getPackageName() + ".fileprovider",
-                                  file
-                          );
-
-                          runOnUiThread(() -> {
-                              Intent send = new Intent(Intent.ACTION_SEND);
-                              send.setType("application/pdf");
-                              send.putExtra(Intent.EXTRA_STREAM, uri);
-                              if (message != null && !message.isEmpty()) {
-                                  send.putExtra(Intent.EXTRA_TEXT, message);
-                              }
-                              send.setClipData(ClipData.newRawUri("PDF piOca", uri));
-                              send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                              startActivity(Intent.createChooser(send, "Compartir resumen de servicio"));
-                          });
-                      } catch (Exception e) {
-                          runOnUiThread(() -> Toast.makeText(
-                                  this,
-                                  "No se pudo compartir el PDF: " + e.getMessage(),
-                                  Toast.LENGTH_LONG
-                          ).show());
-                      }
-                  }).start();
-              }
-
-              public class NativeBridge {
-                  @JavascriptInterface
-                  public void syncServiceState(String json) {
-                      runOnUiThread(() -> handleServiceState(json));
-                  }
-
-                  @JavascriptInterface
-                  public void sharePdf(String dataUrl, String fileName, String message) {
-                      sharePdfNative(dataUrl, fileName, message);
-                  }
-              }
-
-              @Override
-              protected void onResume() {
-                  super.onResume();
-                  if (pageReady) {
-                      installNativeHooks();
-                      applyPendingAutoFinish();
-                  }
-                  webView.postDelayed(this::beginPermissionFlow, 500);
-              }
-
-              @Override
-              public void onBackPressed() {
-                  if (webView.canGoBack()) {
-                      webView.goBack();
-                  } else {
-                      super.onBackPressed();
-                  }
-              }
-
-              @Override
-              protected void onDestroy() {
-                  try {
-                      unregisterReceiver(autoFinishReceiver);
-                  } catch (Exception ignored) {
-                  }
-                  super.onDestroy();
-              }
-          }
-          EOF
-
-          cat > android-cotizador/app/src/main/java/ar/com/pioca/cotizador/BackgroundLocationService.java <<'EOF'
-          package ar.com.pioca.cotizador;
-
-          import android.Manifest;
-          import android.app.Notification;
-          import android.app.NotificationChannel;
-          import android.app.NotificationManager;
-          import android.app.PendingIntent;
-          import android.app.Service;
-          import android.content.Intent;
-          import android.content.SharedPreferences;
-          import android.content.pm.PackageManager;
-          import android.location.Location;
-          import android.location.LocationListener;
-          import android.location.LocationManager;
-          import android.os.Build;
-          import android.os.Bundle;
-          import android.os.IBinder;
-
-          public class BackgroundLocationService extends Service implements LocationListener {
-
-              private static final String CHANNEL_ID = "pioca_cotizador_servicio";
-              private static final int NOTIFICATION_ID = 1717;
-              private static final long CHECK_MS = 120000L;
-              private static final double STOP_DISTANCE_M = 200.0;
-              private static final double MAX_ACCURACY_M = 100.0;
-
-              private LocationManager locationManager;
-              private long startAt;
-              private double startLat;
-              private double startLng;
-              private double startAccuracy;
-              private long lastCheckAt = 0L;
-
-              @Override
-              public void onCreate() {
-                  super.onCreate();
-                  createChannel();
-              }
-
-              @Override
-              public int onStartCommand(Intent intent, int flags, int startId) {
-                  SharedPreferences p = getSharedPreferences("native_tracking", MODE_PRIVATE);
-
-                  if (intent != null && intent.hasExtra("startAt")) {
-                      startAt = intent.getLongExtra("startAt", 0L);
-                      startLat = intent.getDoubleExtra("lat", Double.NaN);
-                      startLng = intent.getDoubleExtra("lng", Double.NaN);
-                      startAccuracy = intent.getDoubleExtra("accuracy", 100.0);
-                  } else if (p.getBoolean("tracking_active", false)) {
-                      startAt = p.getLong("startAt", 0L);
-                      startLat = Double.longBitsToDouble(p.getLong("lat_bits", 0L));
-                      startLng = Double.longBitsToDouble(p.getLong("lng_bits", 0L));
-                      startAccuracy = Double.longBitsToDouble(p.getLong("accuracy_bits", 0L));
-                  } else {
-                      stopSelf();
-                      return START_NOT_STICKY;
-                  }
-
-                  startForeground(NOTIFICATION_ID, buildNotification());
-                  beginLocationUpdates();
-                  return START_STICKY;
-              }
-
-              private void createChannel() {
-                  if (Build.VERSION.SDK_INT >= 26) {
-                      NotificationChannel c = new NotificationChannel(
-                              CHANNEL_ID,
-                              "Servicio activo piOca",
-                              NotificationManager.IMPORTANCE_LOW
-                      );
-                      c.setDescription("Control de ubicación mientras hay un servicio activo");
-                      NotificationManager nm = getSystemService(NotificationManager.class);
-                      if (nm != null) nm.createNotificationChannel(c);
-                  }
-              }
-
-              private Notification buildNotification() {
-                  Intent open = new Intent(this, MainActivity.class);
-                  open.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-
-                  PendingIntent pi = PendingIntent.getActivity(
-                          this,
-                          0,
-                          open,
-                          PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
-                  );
-
-                  return new Notification.Builder(this, CHANNEL_ID)
-                          .setSmallIcon(R.mipmap.ic_launcher)
-                          .setContentTitle("piOca Cotizador · servicio activo")
-                          .setContentText("Controlando ubicación para finalizar el servicio al alejarte.")
-                          .setContentIntent(pi)
-                          .setOngoing(true)
-                          .setCategory(Notification.CATEGORY_SERVICE)
-                          .build();
-              }
-
-              private void beginLocationUpdates() {
-                  if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
-                          != PackageManager.PERMISSION_GRANTED) {
-                      stopSelf();
-                      return;
-                  }
-
-                  if (locationManager == null) {
-                      locationManager = (LocationManager) getSystemService(LOCATION_SERVICE);
-                  }
-
-                  if (locationManager == null) return;
-
-                  try {
-                      if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                          locationManager.requestLocationUpdates(
-                                  LocationManager.GPS_PROVIDER,
-                                  CHECK_MS,
-                                  20f,
-                                  this
-                          );
-                      }
-                  } catch (Exception ignored) {
-                  }
-
-                  try {
-                      if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
-                          locationManager.requestLocationUpdates(
-                                  LocationManager.NETWORK_PROVIDER,
-                                  CHECK_MS,
-                                  20f,
-                                  this
-                          );
-                      }
-                  } catch (Exception ignored) {
-                  }
-              }
-
-              @Override
-              public void onLocationChanged(Location location) {
-                  if (location == null) return;
-
-                  long now = System.currentTimeMillis();
-                  if (lastCheckAt > 0 && now - lastCheckAt < CHECK_MS - 5000L) return;
-                  lastCheckAt = now;
-
-                  double currentAccuracy = location.hasAccuracy()
-                          ? Math.max(0.0, location.getAccuracy())
-                          : MAX_ACCURACY_M;
-
-                  double safeStartAccuracy = Math.max(0.0, startAccuracy);
-
-                  if (safeStartAccuracy > MAX_ACCURACY_M || currentAccuracy > MAX_ACCURACY_M) {
-                      return;
-                  }
-
-                  double rawDistance = distanceMeters(
-                          startLat,
-                          startLng,
-                          location.getLatitude(),
-                          location.getLongitude()
-                  );
-
-                  double conservativeDistance =
-                          rawDistance
-                                  - Math.min(safeStartAccuracy, MAX_ACCURACY_M)
-                                  - Math.min(currentAccuracy, MAX_ACCURACY_M);
-
-                  if (conservativeDistance >= STOP_DISTANCE_M) {
-                      saveAutoFinish(location, rawDistance);
-                      sendBroadcast(
-                              new Intent(MainActivity.ACTION_AUTO_FINISH)
-                                      .setPackage(getPackageName())
-                      );
-                      stopSelf();
-                  }
-              }
-
-              private void saveAutoFinish(Location location, double rawDistance) {
-                  long endAt = System.currentTimeMillis();
-
-                  getSharedPreferences("native_tracking", MODE_PRIVATE)
-                          .edit()
-                          .putBoolean("tracking_active", false)
-                          .putBoolean("pending_auto_finish", true)
-                          .putLong("finish_startAt", startAt)
-                          .putLong("finish_endAt", endAt)
-                          .putLong("finish_lat_bits", Double.doubleToRawLongBits(location.getLatitude()))
-                          .putLong("finish_lng_bits", Double.doubleToRawLongBits(location.getLongitude()))
-                          .putLong("finish_accuracy_bits", Double.doubleToRawLongBits(location.getAccuracy()))
-                          .putLong("finish_distance_bits", Double.doubleToRawLongBits(rawDistance))
-                          .apply();
-              }
-
-              private static double distanceMeters(
-                      double lat1,
-                      double lon1,
-                      double lat2,
-                      double lon2) {
-
-                  double earth = 6371000.0;
-                  double p1 = Math.toRadians(lat1);
-                  double p2 = Math.toRadians(lat2);
-                  double dp = Math.toRadians(lat2 - lat1);
-                  double dl = Math.toRadians(lon2 - lon1);
-
-                  double a =
-                          Math.sin(dp / 2.0) * Math.sin(dp / 2.0)
-                                  + Math.cos(p1) * Math.cos(p2)
-                                  * Math.sin(dl / 2.0) * Math.sin(dl / 2.0);
-
-                  double c = 2.0 * Math.atan2(Math.sqrt(a), Math.sqrt(1.0 - a));
-                  return earth * c;
-              }
-
-              @Override
-              public void onProviderEnabled(String provider) {
-              }
-
-              @Override
-              public void onProviderDisabled(String provider) {
-              }
-
-              @Override
-              public void onStatusChanged(String provider, int status, Bundle extras) {
-              }
-
-              @Override
-              public IBinder onBind(Intent intent) {
-                  return null;
-              }
-
-              @Override
-              public void onDestroy() {
-                  if (locationManager != null) {
-                      try {
-                          locationManager.removeUpdates(this);
-                      } catch (Exception ignored) {
-                      }
-                  }
-                  super.onDestroy();
-              }
-          }
-          EOF
-
-          python3 -m pip install --quiet pillow
-          python3 - <<'PY'
-          from PIL import Image
-          from pathlib import Path
-
-          src = Image.open('icon-cotizador-pioca.png').convert('RGBA')
-          if src.width != src.height:
-              raise SystemExit('ERROR: icon-cotizador-pioca.png debe ser cuadrado')
-
-          sizes = {
-              'mipmap-mdpi': 48,
-              'mipmap-hdpi': 72,
-              'mipmap-xhdpi': 96,
-              'mipmap-xxhdpi': 144,
-              'mipmap-xxxhdpi': 192,
-          }
-
-          for folder, size in sizes.items():
-              out = Path('android-cotizador/app/src/main/res') / folder / 'ic_launcher.png'
-              src.resize((size, size), Image.Resampling.LANCZOS).save(out, 'PNG')
-          PY
-
-      - name: Preparar firma
-        env:
-          COTIZADOR_KEYSTORE_B64: ${{ secrets.COTIZADOR_KEYSTORE_B64 }}
-        run: |
-          set -e
-          printf '%s' "$COTIZADOR_KEYSTORE_B64" | base64 --decode > android-cotizador/pioca-cotizador-release.jks
-          test -s android-cotizador/pioca-cotizador-release.jks
-
-      - name: Compilar APK release firmada
-        working-directory: android-cotizador
-        env:
-          COTIZADOR_KEYSTORE_PATH: ../pioca-cotizador-release.jks
-          COTIZADOR_KEYSTORE_PASS: ${{ secrets.COTIZADOR_KEYSTORE_PASS }}
-        run: |
-          gradle :app:assembleRelease --no-daemon
-
-      - name: Preparar APK final
-        run: |
-          cp android-cotizador/app/build/outputs/apk/release/app-release.apk piOca-Cotizador-V1.apk
-
-      - name: Subir APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: piOca-Cotizador-APK-V1
-          path: piOca-Cotizador-V1.apk
-          retention-days: 90
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>piOca® Servicio</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+.autocompleteWrap{position:relative}
+.addressSuggestions{
+  position:absolute;
+  left:0;right:0;top:100%;
+  z-index:50;
+  background:#fff;
+  border:1px solid #d8dde5;
+  border-radius:12px;
+  box-shadow:0 10px 28px rgba(0,0,0,.14);
+  overflow:hidden;
+  margin-top:6px;
+  max-height:290px;
+  overflow-y:auto;
+}
+.addressSuggestion{
+  width:100%;
+  display:block;
+  text-align:left;
+  background:#fff;
+  color:#1b2430;
+  border:0;
+  border-bottom:1px solid #edf0f4;
+  padding:12px 14px;
+  margin:0;
+  cursor:pointer;
+  font:inherit;
+}
+.addressSuggestion:last-child{border-bottom:0}
+.addressSuggestion:active{background:#f2f6fb}
+.addressSuggestion b{
+  display:block;
+  font-size:14px;
+  line-height:1.25;
+}
+.addressSuggestion span{
+  display:block;
+  margin-top:3px;
+  font-size:12px;
+  line-height:1.3;
+  color:#697386;
+}
+.addressSuggestion.info{
+  cursor:default;
+  color:#697386;
+  font-size:13px;
+}
+.addressConfirmed{
+  font-size:12px;
+  margin-top:7px;
+  color:#16803a;
+  font-weight:700;
+}
+
+.previewCommercial{
+  background:#f7f9fc;
+  border:1px solid #dce3ec;
+  border-radius:16px;
+  padding:16px;
+  margin-top:14px;
+  color:#233143;
+}
+.previewCommercial h3{
+  margin:0 0 12px;
+  color:#0d56a3;
+  font-size:18px;
+}
+.previewLine{
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  padding:8px 0;
+  border-bottom:1px solid #e6ebf1;
+}
+.previewLine:last-child{border-bottom:0}
+.previewLine span{color:#677385}
+.previewLine b{text-align:right}
+.previewTotal{
+  font-size:20px;
+  color:#0d56a3;
+}
+.previewItems{
+  margin-top:10px;
+  padding-top:8px;
+  border-top:1px solid #e6ebf1;
+}
+.invoiceBox{
+  margin-top:14px;
+  padding:12px 14px;
+  border:1px solid #cfd9e6;
+  border-radius:14px;
+  background:#fff;
+}
+.invoiceBox .previewLine{
+  padding:9px 0;
+}
+.invoiceBase{
+  color:#233143;
+}
+.invoiceBase small{
+  display:block;
+  margin-top:3px;
+  color:#7a8797;
+  font-weight:600;
+  font-size:12px;
+}
+.travelChoiceOverlay{
+  position:fixed;
+  inset:0;
+  z-index:9999;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:20px;
+  background:rgba(20,32,46,.48);
+}
+.travelChoiceBox{
+  width:min(460px,100%);
+  background:#fff;
+  border-radius:20px;
+  padding:22px;
+  box-shadow:0 18px 55px rgba(0,0,0,.22);
+  border:1px solid #dce4ed;
+}
+.travelChoiceBox h3{
+  margin:0 0 10px;
+  color:#26384c;
+  font-size:21px;
+}
+.travelChoiceBox p{
+  margin:0 0 18px;
+  color:#68788b;
+  line-height:1.45;
+}
+.travelChoiceButtons{
+  display:grid;
+  gap:10px;
+}
+</style>
+</head>
+<body>
+<main class="shell">
+  <header class="head">
+    <div class="brandMark" style="background:transparent;box-shadow:none;border-radius:0;">
+      <img src="https://automatizacionpioca.github.io/pioca-gps/logo-pioca.png" alt="piOca®" style="width:100%;height:auto;display:block;">
+    </div>
+    <div>
+      <h1>Servicio técnico</h1>
+      <p>Cálculo interno de intervención y emisión.</p>
+    </div>
+  </header>
+
+  <nav class="nav">
+    <a class="activo" href="index.html">Nuevo</a>
+    <a href="log.html">Historial</a>
+    <a href="cfg.html">Configuración</a>
+  </nav>
+
+  <section class="body">
+
+    <div class="card" id="serviceCard">
+      <h2>Servicio en domicilio</h2>
+      <p>Usalo cuando llegás al cliente. Guarda hora, GPS y dirección. El tiempo se reconstruye aunque el teléfono se bloquee.</p>
+
+      <div id="idleBox">
+        <button class="verde" id="startService">INICIAR SERVICIO</button>
+        <div class="status info hidden" id="geoInfo"></div>
+      </div>
+
+      <div id="runningBox" class="hidden">
+        <div class="status ok">Servicio en curso</div>
+        <div class="timer" id="timer">00:00:00</div>
+        <div class="muted" id="startedAt" style="text-align:center"></div>
+        <div class="muted" id="runningLocation" style="text-align:center;margin-top:6px"></div>
+        <div class="muted" style="text-align:center;margin-top:4px;font-size:12px">Control automático de alejamiento cada 2 min · aprox. 200 m</div>
+        <button class="rojo" id="finishService">FINALIZAR SERVICIO</button>
+      </div>
+
+      <div id="finishedBox" class="hidden">
+        <div class="status ok" id="finishedStatus">Servicio finalizado correctamente.</div>
+        <div class="kpi">
+          <span>Tiempo de mano de obra registrado</span>
+          <b id="workedTime">—</b>
+        </div>
+        <div class="kpi">
+          <span>Ubicación guardada al iniciar</span>
+          <b id="savedLocation" style="font-size:14px">—</b>
+        </div>
+        <button class="azul" id="continueService">CALCULAR DISTANCIA Y TRASLADO</button>
+        <div class="status info hidden" id="serviceRouteState"></div>
+        <button class="claro" id="newService">DESCARTAR Y NUEVO SERVICIO</button>
+      </div>
+    </div>
+
+    <div class="card" id="quoteCard">
+      <h2>Cotización anticipada</h2>
+      <p>Para calcular un service desde casa antes de ir al domicilio.</p>
+
+      <label for="address">Dirección del cliente</label>
+      <div class="autocompleteWrap">
+        <input id="address" autocomplete="off" autocapitalize="words"
+          placeholder="Ej.: Av. Maipú 2300, Olivos">
+        <div id="addressSuggestions" class="addressSuggestions hidden"></div>
+      </div>
+      <div id="addressConfirmed" class="addressConfirmed hidden">✓ Dirección seleccionada de Google</div>
+
+      <label for="estimatedMinutes">Tiempo estimado de trabajo</label>
+      <input id="estimatedMinutes" type="number" min="0" inputmode="numeric" placeholder="Minutos">
+
+      <button class="oscuro" id="quoteAddress">CALCULAR POR DIRECCIÓN</button>
+      <div class="status info hidden" id="addressInfo"></div>
+    </div>
+
+    <div class="card hidden" id="calcCard">
+      <h2>Datos para calcular</h2>
+      <p>Los valores económicos se toman de Configuración y nunca se muestran al cliente.</p>
+
+      <div id="routeSummary" class="hidden">
+        <div class="row2">
+          <div class="kpi">
+            <span>Distancia total ida y vuelta</span>
+            <b id="routeKm">—</b>
+          </div>
+          <div class="kpi">
+            <span>Tiempo de traslado computado</span>
+            <b id="routeMinutes">—</b>
+          </div>
+        </div>
+      </div>
+
+      <label for="tolls">Cantidad de peajes</label>
+      <select id="tolls">
+        <option value="0">0</option>
+        <option value="1">1</option>
+        <option value="2">2</option>
+        <option value="3">3</option>
+        <option value="4">4</option>
+      </select>
+
+      <label for="parts">¿Hubo accesorios o repuestos?</label>
+      <select id="parts">
+        <option value="no">No</option>
+        <option value="si">Sí</option>
+      </select>
+
+      <div id="partsBox" class="hidden">
+        <div id="itemsContainer"></div>
+
+        <button type="button" class="claro" id="addItemBtn">+ AGREGAR OTRO ACCESORIO / REPUESTO</button>
+
+        <div class="muted" style="margin-top:8px">
+          Si cargás un solo ítem, se toma únicamente ese. Podés agregar todos los que necesites.
+        </div>
+      </div>
+
+      <button class="azul" id="previewBtn">VISTA PREVIA</button>
+      <div id="previewError" class="status warn hidden"></div>
+
+      <div id="preview" class="previewCommercial hidden">
+        <h3>Resumen del servicio</h3>
+
+        <div class="previewLine">
+          <span id="previewLocationLabel">Ubicación</span>
+          <b id="previewLocation">—</b>
+        </div>
+
+        <div class="previewLine">
+          <span>Tiempo empleado en el servicio</span>
+          <b id="previewTime">—</b>
+        </div>
+
+        <div id="previewItems" class="previewItems hidden"></div>
+
+        <div class="previewLine">
+          <span>Precio efectivo</span>
+          <b class="previewTotal" id="previewCash">—</b>
+        </div>
+
+        <div class="invoiceBox">
+          <div class="previewLine">
+            <span>Precio por transferencia + IVA</span>
+            <b class="invoiceBase" id="previewPlusIva">—</b>
+          </div>
+
+          <div class="previewLine">
+            <span>Precio final IVA incluido</span>
+            <b class="previewTotal" id="previewIvaIncluded">—</b>
+          </div>
+        </div>
+      </div>
+
+      <button class="verde hidden" id="issueBtn" style="margin-top:14px">EMITIR</button>
+      <div id="issueStatus" class="status info hidden"></div>
+      <div id="pdfActions" class="hidden" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
+        <button class="claro" id="openPdfBtn" type="button">VER PDF</button>
+        <button class="azul" id="sharePdfBtn" type="button">COMPARTIR PDF</button>
+        <button class="claro" id="copyMessageBtn" type="button" style="grid-column:1/-1">COPIAR MENSAJE</button>
+        <div class="muted" style="grid-column:1/-1;text-align:center;font-size:12px">
+          Para enviarlo, usá COMPARTIR PDF. El visor puede cambiar el nombre del archivo.
+        </div>
+      </div>
+
+      <button class="rojo" id="discardCalculation" type="button" style="margin-top:14px">DESCARTAR SERVICIO</button>
+    </div>
+
+  </section>
+
+  <div class="footerNote">piOca® · uso interno</div>
+</main>
+
+<div id="travelChoiceOverlay" class="travelChoiceOverlay hidden">
+  <div class="travelChoiceBox">
+    <h3>¿Computar también el tiempo de traslado de regreso?</h3>
+    <p>Los kilómetros se calculan siempre ida y vuelta. Esta opción modifica únicamente el tiempo de traslado.</p>
+    <div class="travelChoiceButtons">
+      <button class="azul" id="travelRoundTripBtn" type="button">SÍ, IDA Y VUELTA</button>
+      <button class="claro" id="travelOneWayBtn" type="button">NO, SOLO IDA</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js"></script>
+<script src="r17-pdf.js?v=20260929-6"></script>
+<script>
+const SERVICE_KEY='r17_active_v1';
+const AUTO_CHECK_MS=120000;
+const AUTO_STOP_DISTANCE_M=200;
+const AUTO_MAX_ACCURACY_M=100;
+const TRANSFER_SURCHARGE_PERCENT=12;
+const CFG_KEY='r17_cfg_v1';
+const ROUTER_URL='https://apxrmkdegjnblkbyjsbp.supabase.co/functions/v1/r17-router';
+const ISSUE_URL='https://apxrmkdegjnblkbyjsbp.supabase.co/functions/v1/r17-issue';
+const SUPABASE_PUBLISHABLE='sb_publishable_htgEX8HiRGAjpCVhPw1gfg_tOPxkJoI';
+let currentRoute=null;
+let currentContext=null;
+let lastPreviewCalc=null;
+let lastIssuedRecord=null;
+let selectedCustomerPlaceId=null;
+let selectedCustomerText='';
+let autocompleteTimer=null;
+let autocompleteSeq=0;
+
+const $=id=>document.getElementById(id);
+
+function setModeVisibility(mode){
+  if(mode==='service'){
+    $('serviceCard').classList.remove('hidden');
+    $('quoteCard').classList.add('hidden');
+    return;
+  }
+
+  if(mode==='quote'){
+    $('serviceCard').classList.add('hidden');
+    $('quoteCard').classList.remove('hidden');
+    return;
+  }
+
+  $('serviceCard').classList.remove('hidden');
+  $('quoteCard').classList.remove('hidden');
+}
+
+function resetCalculationBoard(options={}){
+  const clearAddress=options.clearAddress!==false;
+
+  currentRoute=null;
+  currentContext=null;
+  lastPreviewCalc=null;
+  lastIssuedRecord=null;
+
+  if(autocompleteTimer){
+    clearTimeout(autocompleteTimer);
+    autocompleteTimer=null;
+  }
+  autocompleteSeq++;
+
+  selectedCustomerPlaceId=null;
+  selectedCustomerText='';
+
+  if(clearAddress){
+    $('address').value='';
+  }
+  $('addressSuggestions').innerHTML='';
+  $('addressSuggestions').classList.add('hidden');
+  $('addressConfirmed').classList.add('hidden');
+  $('addressInfo').classList.add('hidden');
+  $('addressInfo').textContent='';
+
+  // La mano de obra estimada pertenece únicamente a Cotización anticipada.
+  $('estimatedMinutes').value='';
+
+  // Campos compartidos entre ambos modos.
+  $('tolls').value='0';
+  $('parts').value='no';
+  $('partsBox').classList.add('hidden');
+  $('itemsContainer').innerHTML='';
+  itemSeq=0;
+
+  $('routeSummary').classList.add('hidden');
+  $('routeKm').textContent='—';
+  $('routeMinutes').textContent='—';
+
+  $('preview').classList.add('hidden');
+  $('previewItems').innerHTML='';
+  $('previewError').classList.add('hidden');
+  $('previewError').textContent='';
+
+  $('issueBtn').classList.add('hidden');
+  $('issueBtn').disabled=false;
+  $('issueBtn').textContent='EMITIR';
+  $('issueStatus').classList.add('hidden');
+  $('issueStatus').textContent='';
+  $('pdfActions').classList.add('hidden');
+
+  $('serviceRouteState').classList.add('hidden');
+  $('serviceRouteState').textContent='';
+
+  $('quoteAddress').disabled=false;
+  $('continueService').disabled=false;
+  $('calcCard').classList.add('hidden');
+
+  $('travelChoiceOverlay').classList.add('hidden');
+}
+
+function readConfig(){
+  try{
+    return JSON.parse(localStorage.getItem(CFG_KEY)||'{}');
+  }catch(e){
+    return {};
+  }
+}
+
+
+async function requestAutocomplete(input){
+  const response=await fetch(ROUTER_URL,{
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'apikey':SUPABASE_PUBLISHABLE,
+      'Authorization':'Bearer '+SUPABASE_PUBLISHABLE
+    },
+    body:JSON.stringify({
+      action:'autocomplete',
+      input:String(input||'').trim()
+    })
+  });
+
+  let data=null;
+  try{
+    data=await response.json();
+  }catch(e){
+    throw new Error('La búsqueda de direcciones respondió con un formato inválido.');
+  }
+
+  if(!response.ok || !data.ok){
+    throw new Error(routeErrorText(data,response.status));
+  }
+
+  return Array.isArray(data.suggestions) ? data.suggestions : [];
+}
+
+function hideAddressSuggestions(){
+  $('addressSuggestions').classList.add('hidden');
+}
+
+function renderAddressSuggestions(items){
+  const box=$('addressSuggestions');
+  box.innerHTML='';
+
+  if(!items.length){
+    const empty=document.createElement('div');
+    empty.className='addressSuggestion info';
+    empty.textContent='No se encontraron direcciones.';
+    box.appendChild(empty);
+    box.classList.remove('hidden');
+    return;
+  }
+
+  items.forEach(item=>{
+    const btn=document.createElement('button');
+    btn.type='button';
+    btn.className='addressSuggestion';
+
+    const main=document.createElement('b');
+    main.textContent=item.mainText || item.text || '';
+
+    const secondary=document.createElement('span');
+    secondary.textContent=item.secondaryText || '';
+
+    btn.appendChild(main);
+    if(secondary.textContent) btn.appendChild(secondary);
+
+    btn.onclick=()=>{
+      const selectedText=item.text || item.mainText || '';
+
+      if(autocompleteTimer){
+        clearTimeout(autocompleteTimer);
+        autocompleteTimer=null;
+      }
+
+      autocompleteSeq++;
+      $('address').value=selectedText;
+      selectedCustomerPlaceId=item.placeId || null;
+      selectedCustomerText=selectedText.trim();
+
+      $('addressConfirmed').classList.toggle('hidden',!selectedCustomerPlaceId);
+      $('addressInfo').classList.add('hidden');
+      hideAddressSuggestions();
+
+      // En móviles evita que un focus/input tardío vuelva a abrir el menú.
+      setTimeout(()=>{
+        hideAddressSuggestions();
+        if(document.activeElement===$('address')){
+          $('address').blur();
+        }
+      },0);
+    };
+
+    box.appendChild(btn);
+  });
+
+  box.classList.remove('hidden');
+}
+
+function showAutocompleteMessage(text){
+  const box=$('addressSuggestions');
+  box.innerHTML='';
+  const row=document.createElement('div');
+  row.className='addressSuggestion info';
+  row.textContent=text;
+  box.appendChild(row);
+  box.classList.remove('hidden');
+}
+
+function routeErrorText(data,status){
+  if(data && data.error) return data.error;
+  return 'Error al calcular la ruta ('+status+').';
+}
+
+async function calculateRoute(origin,destination){
+  const response=await fetch(ROUTER_URL,{
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'apikey':SUPABASE_PUBLISHABLE,
+      'Authorization':'Bearer '+SUPABASE_PUBLISHABLE
+    },
+    body:JSON.stringify({origin,destination})
+  });
+
+  let data=null;
+  try{
+    data=await response.json();
+  }catch(e){
+    throw new Error('La función respondió con un formato inválido.');
+  }
+
+  if(!response.ok || !data.ok){
+    throw new Error(routeErrorText(data,response.status));
+  }
+
+  return data;
+}
+
+
+function num(v){
+  const n=Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function round500(v){
+  return Math.round(num(v)/500)*500;
+}
+
+function money(v){
+  return new Intl.NumberFormat('es-AR',{
+    style:'currency',
+    currency:'ARS',
+    maximumFractionDigits:0
+  }).format(num(v));
+}
+
+function minutesText(value){
+  const min=Math.max(0,Math.round(num(value)));
+  const h=Math.floor(min/60);
+  const m=min%60;
+
+  if(h && m) return h+' h '+m+' min';
+  if(h) return h+' h';
+  return m+' min';
+}
+
+function serviceLaborMinutes(){
+  const st=readState();
+  if(!st || !st.startAt || !st.endAt) return 0;
+  return Math.max(0,(st.endAt-st.startAt)/60000);
+}
+
+function configReady(cfg){
+  return (
+    cfg &&
+    num(cfg.km)>=0 &&
+    num(cfg.travel)>=0 &&
+    num(cfg.labor)>=0 &&
+    num(cfg.toll)>=0 &&
+    String(cfg.km??'').trim()!=='' &&
+    String(cfg.travel??'').trim()!=='' &&
+    String(cfg.labor??'').trim()!=='' &&
+    String(cfg.toll??'').trim()!==''
+  );
+}
+
+
+function askReturnTravelTime(){
+  return new Promise(resolve=>{
+    const overlay=$('travelChoiceOverlay');
+    const yes=$('travelRoundTripBtn');
+    const no=$('travelOneWayBtn');
+
+    overlay.classList.remove('hidden');
+
+    const cleanup=()=>{
+      yes.onclick=null;
+      no.onclick=null;
+      overlay.classList.add('hidden');
+    };
+
+    yes.onclick=()=>{
+      cleanup();
+      resolve(true);
+    };
+
+    no.onclick=()=>{
+      cleanup();
+      resolve(false);
+    };
+  });
+}
+
+function calculateAmounts(){
+  const cfg=readConfig();
+
+  if(!configReady(cfg)){
+    throw new Error('Faltan completar valores económicos en Configuración.');
+  }
+
+  if(!currentRoute || !currentContext){
+    throw new Error('Primero calculá la ruta.');
+  }
+
+  const routeKm=num(currentRoute.round_trip?.distance_km);
+
+  const includeReturnTravelTime=
+    currentContext.includeReturnTravelTime!==false;
+
+  const travelMinutes=includeReturnTravelTime
+    ? num(currentRoute.round_trip?.duration_minutes)
+    : num(currentRoute.one_way?.duration_minutes);
+
+  let laborMinutes=0;
+
+  if(currentContext.mode==='service'){
+    laborMinutes=serviceLaborMinutes();
+  }else{
+    laborMinutes=num($('estimatedMinutes').value);
+    if(laborMinutes<=0){
+      throw new Error('Ingresá el Tiempo estimado de trabajo.');
+    }
+  }
+
+  const tollCount=num($('tolls').value);
+  const items=$('parts').value==='si' ? getItems() : [];
+
+  if($('parts').value==='si' && items.length===0){
+    throw new Error('Cargá al menos un accesorio o repuesto, o seleccioná No.');
+  }
+
+  const kmCost=routeKm*num(cfg.km);
+  const travelCost=(travelMinutes/60)*num(cfg.travel);
+  const laborCost=(laborMinutes/60)*num(cfg.labor);
+  const tollCost=tollCount*num(cfg.toll);
+  const partsCost=items.reduce((sum,item)=>sum+(num(item.qty)*num(item.price)),0);
+
+  const visitLaborRaw=kmCost+travelCost+laborCost+tollCost;
+  const visitLaborRounded=round500(visitLaborRaw);
+  const totalCashRaw=visitLaborRaw+partsCost;
+  const cashRounded=visitLaborRounded+partsCost;
+
+  const ivaPercent=(cfg.iva===undefined || String(cfg.iva).trim()==='') ? 21 : num(cfg.iva);
+
+  // Precio efectivo: se conserva exactamente como estaba.
+  // Transferencia: efectivo + 12% de recargo comercial, y sobre ese subtotal se aplica IVA.
+  const transferSurchargePercent=TRANSFER_SURCHARGE_PERCENT;
+  const transferSurchargeAmount=cashRounded*(transferSurchargePercent/100);
+  const transferBase=cashRounded+transferSurchargeAmount;
+  const ivaAmount=transferBase*(ivaPercent/100);
+  const ivaIncluded=transferBase+ivaAmount;
+
+  return {
+    routeKm,
+    travelMinutes,
+    includeReturnTravelTime,
+    laborMinutes,
+    tollCount,
+    items,
+    kmCost,
+    travelCost,
+    laborCost,
+    tollCost,
+    partsCost,
+    visitLaborRaw,
+    visitLaborRounded,
+    totalCashRaw,
+    cashRounded,
+    transferSurchargePercent,
+    transferSurchargeAmount,
+    transferBase,
+    ivaPercent,
+    ivaAmount,
+    ivaIncluded
+  };
+}
+
+function renderCommercialPreview(calc){
+  $('previewLocationLabel').textContent=
+    currentContext.mode==='service'
+      ? 'Ubicación aproximada del cliente'
+      : 'Ubicación';
+
+  $('previewLocation').textContent=
+    currentContext.customerAddress ||
+    (currentContext.mode==='service'
+      ? serviceAddressForHistory()
+      : 'Ubicación registrada');
+
+  $('previewTime').textContent=minutesText(calc.laborMinutes + calc.travelMinutes);
+  $('previewCash').textContent=money(calc.cashRounded);
+  $('previewPlusIva').textContent=money(calc.transferBase)+' + IVA';
+  $('previewIvaIncluded').textContent=money(calc.ivaIncluded);
+
+  const itemsBox=$('previewItems');
+  itemsBox.innerHTML='';
+
+  if(calc.items.length){
+    const title=document.createElement('div');
+    title.style.fontWeight='700';
+    title.style.marginBottom='6px';
+    title.textContent='Accesorios / repuestos';
+    itemsBox.appendChild(title);
+
+    calc.items.forEach(item=>{
+      const row=document.createElement('div');
+      row.className='previewLine';
+
+      const left=document.createElement('span');
+      left.textContent=item.qty+' × '+(item.desc || 'Ítem');
+
+      const right=document.createElement('b');
+      right.textContent=money(num(item.qty)*num(item.price));
+
+      row.appendChild(left);
+      row.appendChild(right);
+      itemsBox.appendChild(row);
+    });
+
+    itemsBox.classList.remove('hidden');
+  }else{
+    itemsBox.classList.add('hidden');
+  }
+
+  lastPreviewCalc=calc;
+  $('preview').classList.remove('hidden');
+  $('issueBtn').classList.remove('hidden');
+  $('issueStatus').classList.add('hidden');
+}
+
+function showRoute(route){
+  currentRoute=route;
+
+  const includeReturnTravelTime=
+    !currentContext || currentContext.includeReturnTravelTime!==false;
+
+  const billedTravelMinutes=includeReturnTravelTime
+    ? route.round_trip.duration_minutes
+    : route.one_way.duration_minutes;
+
+  $('routeKm').textContent=route.round_trip.distance_km.toFixed(1)+' km';
+  $('routeMinutes').textContent=Math.round(billedTravelMinutes)+' min';
+  $('routeSummary').classList.remove('hidden');
+  $('calcCard').classList.remove('hidden');
+  $('calcCard').scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+let timerInt=null;
+let autoCheckInt=null;
+let autoCheckBusy=false;
+
+function fmtElapsed(ms){
+  const s=Math.max(0,Math.floor(ms/1000));
+  const h=String(Math.floor(s/3600)).padStart(2,'0');
+  const m=String(Math.floor((s%3600)/60)).padStart(2,'0');
+  const sec=String(s%60).padStart(2,'0');
+  return h+':'+m+':'+sec;
+}
+function humanMinutes(ms){
+  const min=Math.max(0,Math.round(ms/60000));
+  const h=Math.floor(min/60);
+  const m=min%60;
+  if(h && m) return h+' h '+m+' min';
+  if(h) return h+' h';
+  return m+' min';
+}
+
+function stopAutoMonitor(){
+  if(autoCheckInt){
+    clearInterval(autoCheckInt);
+    autoCheckInt=null;
+  }
+}
+
+function distanceMeters(lat1,lng1,lat2,lng2){
+  const R=6371000;
+  const toRad=v=>v*Math.PI/180;
+  const p1=toRad(lat1);
+  const p2=toRad(lat2);
+  const dp=toRad(lat2-lat1);
+  const dl=toRad(lng2-lng1);
+
+  const a=
+    Math.sin(dp/2)*Math.sin(dp/2)+
+    Math.cos(p1)*Math.cos(p2)*
+    Math.sin(dl/2)*Math.sin(dl/2);
+
+  return 2*R*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+async function reverseGeocode(lat,lng){
+  const response=await fetch(ROUTER_URL,{
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'apikey':SUPABASE_PUBLISHABLE,
+      'Authorization':'Bearer '+SUPABASE_PUBLISHABLE
+    },
+    body:JSON.stringify({
+      action:'reverse_geocode',
+      lat:Number(lat),
+      lng:Number(lng)
+    })
+  });
+
+  let data=null;
+  try{
+    data=await response.json();
+  }catch(e){
+    throw new Error('La búsqueda de dirección respondió con un formato inválido.');
+  }
+
+  if(!response.ok || !data.ok){
+    const detail=data && data.detail ? ' · '+JSON.stringify(data.detail) : '';
+    throw new Error((data && data.error ? data.error : 'No se pudo obtener la dirección')+detail);
+  }
+
+  return data;
+}
+
+async function enrichServiceAddress(startAt,lat,lng){
+  if(lat==null || lng==null) return;
+
+  try{
+    const geo=await reverseGeocode(lat,lng);
+    const current=readState();
+
+    if(!current || current.startAt!==startAt) return;
+
+    current.address=geo.address||current.address||null;
+    current.placeId=geo.placeId||current.placeId||null;
+    current.locationType=geo.locationType||null;
+    writeState(current);
+    render();
+  }catch(e){
+    const current=readState();
+    if(!current || current.startAt!==startAt) return;
+    current.addressError=e.message||String(e);
+    writeState(current);
+    render();
+  }
+}
+
+
+async function ensureServiceAddress(){
+  let st=readState();
+
+  if(!st || st.lat==null || st.lng==null) return st;
+  if(st.address) return st;
+
+  try{
+    const geo=await reverseGeocode(st.lat,st.lng);
+
+    st=readState();
+    if(!st) return st;
+
+    st.address=geo.address||st.address||null;
+    st.placeId=geo.placeId||st.placeId||null;
+    st.locationType=geo.locationType||st.locationType||null;
+    st.addressError=null;
+    writeState(st);
+    render();
+
+    return st;
+  }catch(e){
+    st=readState();
+    if(st){
+      st.addressError=e.message||String(e);
+      writeState(st);
+      render();
+    }
+    return st;
+  }
+}
+
+function finishServiceState(st,opts={}){
+  if(!st || st.status!=='running') return;
+
+  st.status='finished';
+  st.endAt=Date.now();
+
+  if(opts.auto){
+    st.autoFinished=true;
+    st.autoFinishDistanceM=Number(opts.distanceM)||0;
+    st.autoFinishDetectedAt=Date.now();
+
+    if(opts.position){
+      st.autoFinishLat=opts.position.coords.latitude;
+      st.autoFinishLng=opts.position.coords.longitude;
+      st.autoFinishAccuracy=opts.position.coords.accuracy;
+    }
+  }
+
+  writeState(st);
+  stopAutoMonitor();
+  render();
+}
+
+async function autoLocationCheck(force=false){
+  if(autoCheckBusy) return;
+
+  const st=readState();
+  if(!st || st.status!=='running' || st.lat==null || st.lng==null) return;
+  if(!navigator.geolocation) return;
+
+  // Evita chequeos duplicados demasiado seguidos al volver de segundo plano.
+  const now=Date.now();
+  if(!force && st.lastAutoCheckAt && now-st.lastAutoCheckAt<AUTO_CHECK_MS-5000) return;
+
+  autoCheckBusy=true;
+
+  try{
+    const pos=await new Promise((resolve,reject)=>{
+      navigator.geolocation.getCurrentPosition(
+        resolve,
+        reject,
+        {enableHighAccuracy:true,timeout:15000,maximumAge:30000}
+      );
+    });
+
+    const current=readState();
+    if(!current || current.status!=='running' || current.startAt!==st.startAt) return;
+
+    const rawDistance=distanceMeters(
+      Number(current.lat),
+      Number(current.lng),
+      Number(pos.coords.latitude),
+      Number(pos.coords.longitude)
+    );
+
+    const startAccuracy=Math.max(0,Number(current.accuracy)||0);
+    const currentAccuracy=Math.max(0,Number(pos.coords.accuracy)||0);
+
+    current.lastAutoCheckAt=Date.now();
+    current.lastAutoDistanceM=rawDistance;
+    current.lastAutoAccuracyM=currentAccuracy;
+    writeState(current);
+
+    // Solo finaliza si ambas lecturas tienen precisión razonable.
+    // Restamos el margen de error de ambas lecturas para evitar falsos positivos.
+    const conservativeDistance=
+      rawDistance-
+      Math.min(startAccuracy,AUTO_MAX_ACCURACY_M)-
+      Math.min(currentAccuracy,AUTO_MAX_ACCURACY_M);
+
+    const reliable=
+      startAccuracy<=AUTO_MAX_ACCURACY_M &&
+      currentAccuracy<=AUTO_MAX_ACCURACY_M;
+
+    if(reliable && conservativeDistance>=AUTO_STOP_DISTANCE_M){
+      finishServiceState(current,{
+        auto:true,
+        distanceM:rawDistance,
+        position:pos
+      });
+      setTimeout(()=>ensureServiceAddress(),150);
+    }
+  }catch(e){
+    // Si una lectura falla, no interrumpimos el servicio.
+  }finally{
+    autoCheckBusy=false;
+  }
+}
+
+function startAutoMonitor(){
+  stopAutoMonitor();
+  autoCheckInt=setInterval(()=>autoLocationCheck(false),AUTO_CHECK_MS);
+}
+
+function readState(){
+  try{return JSON.parse(localStorage.getItem(SERVICE_KEY)||'null')}catch(e){return null}
+}
+function writeState(v){
+  localStorage.setItem(SERVICE_KEY,JSON.stringify(v));
+}
+function clearState(){
+  localStorage.removeItem(SERVICE_KEY);
+}
+function showIdle(){
+  $('idleBox').classList.remove('hidden');
+  $('runningBox').classList.add('hidden');
+  $('finishedBox').classList.add('hidden');
+  if(timerInt) clearInterval(timerInt);
+  stopAutoMonitor();
+}
+function showRunning(st){
+  $('idleBox').classList.add('hidden');
+  $('runningBox').classList.remove('hidden');
+  $('finishedBox').classList.add('hidden');
+  $('startedAt').textContent='Iniciado: '+new Date(st.startAt).toLocaleString('es-AR');
+
+  if(st.address){
+    $('runningLocation').textContent='Ubicación: '+st.address;
+  }else if(st.addressError){
+    $('runningLocation').textContent='Dirección pendiente · '+st.addressError;
+  }else if(st.lat!=null){
+    $('runningLocation').textContent='Ubicación guardada · obteniendo dirección…';
+  }else{
+    $('runningLocation').textContent='Ubicación no disponible';
+  }
+
+  const tick=()=>$('timer').textContent=fmtElapsed(Date.now()-st.startAt);
+  tick();
+  if(timerInt) clearInterval(timerInt);
+  timerInt=setInterval(tick,1000);
+  startAutoMonitor();
+}
+function showFinished(st){
+  $('idleBox').classList.add('hidden');
+  $('runningBox').classList.add('hidden');
+  $('finishedBox').classList.remove('hidden');
+  if(timerInt) clearInterval(timerInt);
+  stopAutoMonitor();
+
+  $('workedTime').textContent=humanMinutes(st.endAt-st.startAt);
+
+  if(st.autoFinished){
+    $('finishedStatus').textContent=
+      'Servicio finalizado automáticamente al detectar alejamiento del domicilio.';
+  }else{
+    $('finishedStatus').textContent='Servicio finalizado correctamente.';
+  }
+
+  $('savedLocation').textContent=
+    st.address ||
+    (st.lat!=null
+      ? st.lat.toFixed(5)+', '+st.lng.toFixed(5)+
+        (st.addressError ? ' · '+st.addressError : ' · dirección pendiente')
+      : 'Ubicación no disponible');
+}
+function render(){
+  const st=readState();
+
+  if(!st){
+    showIdle();
+    if(!currentContext || currentContext.mode!=='quote'){
+      setModeVisibility(null);
+    }
+    return;
+  }
+
+  if(st.status==='running'){
+    setModeVisibility('service');
+    showRunning(st);
+  }else if(st.status==='finished'){
+    setModeVisibility('service');
+    showFinished(st);
+  }else{
+    showIdle();
+    setModeVisibility(null);
+  }
+}
+
+$('startService').onclick=()=>{
+  resetCalculationBoard();
+  setModeVisibility('service');
+
+  $('geoInfo').classList.remove('hidden');
+  $('geoInfo').textContent='Obteniendo ubicación…';
+
+  // La hora se guarda en el instante del toque, no después de esperar al GPS.
+  const startAt=Date.now();
+
+  const start=(pos)=>{
+    const st={
+      status:'running',
+      startAt:startAt,
+      lat:pos?pos.coords.latitude:null,
+      lng:pos?pos.coords.longitude:null,
+      accuracy:pos?pos.coords.accuracy:null,
+      address:null,
+      placeId:null,
+      autoFinished:false
+    };
+
+    writeState(st);
+    $('geoInfo').classList.add('hidden');
+    render();
+
+    if(pos){
+      enrichServiceAddress(
+        startAt,
+        pos.coords.latitude,
+        pos.coords.longitude
+      );
+    }
+  };
+
+  if(!navigator.geolocation){
+    $('geoInfo').textContent='Este navegador no permite ubicación. Se iniciará sin GPS.';
+    setTimeout(()=>start(null),800);
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    p=>start(p),
+    e=>{
+      $('geoInfo').textContent='No se obtuvo GPS ('+e.message+'). Se iniciará sin ubicación.';
+      setTimeout(()=>start(null),1200);
+    },
+    {enableHighAccuracy:true,timeout:12000,maximumAge:15000}
+  );
+};
+
+$('finishService').onclick=()=>{
+  const st=readState();
+  finishServiceState(st,{auto:false});
+  setTimeout(()=>ensureServiceAddress(),150);
+};
+
+$('continueService').onclick=async()=>{
+  let st=readState();
+  const cfg=readConfig();
+  const box=$('serviceRouteState');
+
+  if(st && !st.address && st.lat!=null && st.lng!=null){
+    box.classList.remove('hidden');
+    box.textContent='Obteniendo dirección y calculando ruta…';
+    await ensureServiceAddress();
+    st=readState();
+  }
+
+  if(!cfg.base || !String(cfg.base).trim()){
+    box.classList.remove('hidden');
+    box.textContent='Falta cargar Dirección base / Casa en Configuración.';
+    return;
+  }
+
+  if(!st || st.lat==null || st.lng==null){
+    box.classList.remove('hidden');
+    box.textContent='Este servicio no tiene una ubicación GPS guardada al iniciar.';
+    return;
+  }
+
+  const includeReturnTravelTime=await askReturnTravelTime();
+
+  box.classList.remove('hidden');
+  box.textContent='Calculando ruta con Google…';
+  $('continueService').disabled=true;
+
+  try{
+    const baseDestination = cfg.basePlaceId
+      ? {placeId:String(cfg.basePlaceId)}
+      : {address:String(cfg.base).trim()};
+
+    const route=await calculateRoute(
+      {lat:Number(st.lat),lng:Number(st.lng)},
+      baseDestination
+    );
+
+    box.textContent='Ruta calculada correctamente.';
+    currentContext={
+      mode:'service',
+      includeReturnTravelTime,
+      customerAddress:
+        (st && st.address)
+          ? st.address
+          : serviceAddressForHistory()
+    };
+    setModeVisibility('service');
+    showRoute(route);
+  }catch(e){
+    box.textContent='No se pudo calcular: '+(e.message||String(e));
+  }finally{
+    $('continueService').disabled=false;
+  }
+};
+
+$('newService').onclick=()=>{
+  if(confirm('¿Descartar este servicio y comenzar uno nuevo?')){
+    clearState();
+    resetCalculationBoard();
+    setModeVisibility(null);
+    render();
+  }
+};
+
+
+$('address').addEventListener('input',()=>{
+  const query=$('address').value.trim();
+
+  // Si el navegador móvil emite un input tardío después de seleccionar,
+  // conservamos la selección y no volvemos a desplegar Google.
+  if(
+    selectedCustomerPlaceId &&
+    selectedCustomerText &&
+    query===selectedCustomerText
+  ){
+    hideAddressSuggestions();
+    return;
+  }
+
+  currentRoute=null;
+  currentContext=null;
+  $('preview').classList.add('hidden');
+  $('issueBtn').classList.add('hidden');
+  $('issueStatus').classList.add('hidden');
+  selectedCustomerPlaceId=null;
+  selectedCustomerText='';
+  $('addressConfirmed').classList.add('hidden');
+  $('addressInfo').classList.add('hidden');
+
+  if(autocompleteTimer) clearTimeout(autocompleteTimer);
+
+  if(query.length<3){
+    hideAddressSuggestions();
+    return;
+  }
+
+  const seq=++autocompleteSeq;
+  autocompleteTimer=setTimeout(async()=>{
+    showAutocompleteMessage('Buscando direcciones…');
+
+    try{
+      const items=await requestAutocomplete(query);
+      if(seq!==autocompleteSeq) return;
+      renderAddressSuggestions(items);
+    }catch(e){
+      if(seq!==autocompleteSeq) return;
+      showAutocompleteMessage('No se pudieron cargar las sugerencias.');
+    }
+  },300);
+});
+
+$('address').addEventListener('focus',()=>{
+  const value=$('address').value.trim();
+
+  if(
+    selectedCustomerPlaceId &&
+    selectedCustomerText &&
+    value===selectedCustomerText
+  ){
+    hideAddressSuggestions();
+    return;
+  }
+
+  if(value.length>=3){
+    $('address').dispatchEvent(new Event('input'));
+  }
+});
+
+document.addEventListener('click',(e)=>{
+  const wrap=e.target.closest('.autocompleteWrap');
+  if(!wrap) hideAddressSuggestions();
+});
+
+$('quoteAddress').onclick=async()=>{
+  const cfg=readConfig();
+  const customerAddress=$('address').value.trim();
+  const box=$('addressInfo');
+
+  if(!cfg.base || !String(cfg.base).trim()){
+    box.classList.remove('hidden');
+    box.textContent='Falta cargar Dirección base / Casa en Configuración.';
+    return;
+  }
+
+  if(!customerAddress){
+    box.classList.remove('hidden');
+    box.textContent='Ingresá la dirección del cliente.';
+    return;
+  }
+
+  if(!selectedCustomerPlaceId){
+    box.classList.remove('hidden');
+    box.textContent='Seleccioná una dirección de las opciones de Google.';
+    return;
+  }
+
+  const includeReturnTravelTime=await askReturnTravelTime();
+
+  box.classList.remove('hidden');
+  box.textContent='Calculando ruta con Google…';
+  $('quoteAddress').disabled=true;
+
+  try{
+    const baseOrigin = cfg.basePlaceId
+      ? {placeId:String(cfg.basePlaceId)}
+      : {address:String(cfg.base).trim()};
+
+    const route=await calculateRoute(
+      baseOrigin,
+      {placeId:selectedCustomerPlaceId}
+    );
+
+    box.textContent='Ruta calculada correctamente.';
+    currentContext={
+      mode:'quote',
+      includeReturnTravelTime,
+      customerAddress:customerAddress,
+      customerPlaceId:selectedCustomerPlaceId
+    };
+    setModeVisibility('quote');
+    showRoute(route);
+  }catch(e){
+    box.textContent='No se pudo calcular: '+(e.message||String(e));
+  }finally{
+    $('quoteAddress').disabled=false;
+  }
+};
+
+$('discardCalculation').onclick=()=>{
+  const st=readState();
+  const mode=currentContext && currentContext.mode
+    ? currentContext.mode
+    : (st ? 'service' : 'quote');
+
+  const question=mode==='service'
+    ? '¿Descartar este servicio y limpiar todos los datos cargados?'
+    : '¿Descartar esta cotización y limpiar todos los datos cargados?';
+
+  if(!confirm(question)) return;
+
+  if(mode==='service'){
+    clearState();
+  }
+
+  resetCalculationBoard();
+  setModeVisibility(null);
+  render();
+  window.scrollTo({top:0,behavior:'smooth'});
+};
+
+let itemSeq=0;
+
+function addItem(values={}){
+  itemSeq++;
+  const wrap=document.createElement('div');
+  wrap.className='card';
+  wrap.style.marginTop='12px';
+  wrap.style.padding='14px';
+  wrap.dataset.itemId=String(itemSeq);
+
+  wrap.innerHTML=`
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+      <strong style="color:#0d56a3">Ítem ${itemSeq}</strong>
+      <button type="button" class="claro removeItemBtn"
+        style="width:auto;margin:0;padding:8px 11px;font-size:12px">
+        ELIMINAR
+      </button>
+    </div>
+
+    <label>Cantidad</label>
+    <input class="itemQty" type="number" min="1" value="${values.qty||1}">
+
+    <label>Descripción</label>
+    <input class="itemDesc" placeholder="Ej.: Control remoto" value="${values.desc||''}">
+
+    <label>Precio unitario sin IVA</label>
+    <input class="itemPrice" type="number" min="0" step="0.01" inputmode="decimal"
+      placeholder="$" value="${values.price||''}">
+  `;
+
+  wrap.querySelector('.removeItemBtn').onclick=()=>{
+    wrap.remove();
+    renumberItems();
+    if(document.querySelectorAll('#itemsContainer > .card').length===0){
+      addItem();
+    }
+  };
+
+  $('itemsContainer').appendChild(wrap);
+  renumberItems();
+}
+
+function renumberItems(){
+  [...document.querySelectorAll('#itemsContainer > .card')].forEach((el,i)=>{
+    const title=el.querySelector('strong');
+    if(title) title.textContent='Ítem '+(i+1);
+  });
+}
+
+function ensureFirstItem(){
+  if(document.querySelectorAll('#itemsContainer > .card').length===0){
+    addItem();
+  }
+}
+
+function getItems(){
+  return [...document.querySelectorAll('#itemsContainer > .card')].map(el=>({
+    qty:Number(el.querySelector('.itemQty').value||0),
+    desc:el.querySelector('.itemDesc').value.trim(),
+    price:Number(el.querySelector('.itemPrice').value||0)
+  })).filter(x=>x.qty>0 && (x.desc || x.price>0));
+}
+
+$('parts').onchange=()=>{
+  const yes=$('parts').value==='si';
+  $('partsBox').classList.toggle('hidden',!yes);
+  if(yes) ensureFirstItem();
+};
+
+$('addItemBtn').onclick=()=>addItem();
+
+
+function serviceAddressForHistory(){
+  const st=readState();
+  if(st && st.address) return st.address;
+  if(st && st.lat!=null && st.lng!=null){
+    return 'GPS '+Number(st.lat).toFixed(6)+', '+Number(st.lng).toFixed(6);
+  }
+  return 'Ubicación GPS registrada';
+}
+
+function issuedPayload(calc){
+  const cfg=readConfig();
+  const st=readState();
+
+  const customerAddress=
+    currentContext.mode==='quote'
+      ? currentContext.customerAddress
+      : serviceAddressForHistory();
+
+  const payload={
+    mode:currentContext.mode,
+    customer_address:customerAddress,
+    customer_place_id:
+      currentContext.mode==='quote'
+        ? (currentContext.customerPlaceId || null)
+        : (st && st.placeId ? st.placeId : null),
+
+    service_lat:
+      currentContext.mode==='service' && st && st.lat!=null
+        ? Number(st.lat)
+        : null,
+    service_lng:
+      currentContext.mode==='service' && st && st.lng!=null
+        ? Number(st.lng)
+        : null,
+
+    started_at:
+      currentContext.mode==='service' && st && st.startAt
+        ? new Date(st.startAt).toISOString()
+        : null,
+    finished_at:
+      currentContext.mode==='service' && st && st.endAt
+        ? new Date(st.endAt).toISOString()
+        : null,
+
+    one_way_km:num(currentRoute.one_way?.distance_km),
+    round_trip_km:num(currentRoute.round_trip?.distance_km),
+    one_way_minutes:num(currentRoute.one_way?.duration_minutes),
+    round_trip_minutes:num(currentRoute.round_trip?.duration_minutes),
+    labor_minutes:calc.laborMinutes,
+
+    toll_count:calc.tollCount,
+    items:calc.items,
+
+    rate_km:num(cfg.km),
+    rate_travel_hour:num(cfg.travel),
+    rate_labor_hour:num(cfg.labor),
+    rate_toll:num(cfg.toll),
+    iva_percent:calc.ivaPercent,
+
+    cost_km:calc.kmCost,
+    cost_travel:calc.travelCost,
+    cost_labor:calc.laborCost,
+    cost_tolls:calc.tollCost,
+    cost_items:calc.partsCost,
+
+    visit_labor_raw:calc.visitLaborRaw,
+    total_cash_raw:calc.totalCashRaw,
+    total_cash_rounded:calc.cashRounded,
+    iva_amount:calc.ivaAmount,
+    total_invoice:calc.ivaIncluded,
+
+    pdf_version:'r17-pdf-v2-transfer12',
+    pdf_name:'piOca_Resumen_Servicio.pdf',
+
+    snapshot:{
+      base_address:String(cfg.base||''),
+      base_place_id:cfg.basePlaceId||null,
+      customer_address:customerAddress,
+      customer_place_id:
+        currentContext.mode==='quote'
+          ? (currentContext.customerPlaceId||null)
+          : (st && st.placeId ? st.placeId : null),
+      one_way_km:num(currentRoute.one_way?.distance_km),
+      round_trip_km:num(currentRoute.round_trip?.distance_km),
+      one_way_minutes:num(currentRoute.one_way?.duration_minutes),
+      round_trip_minutes:num(currentRoute.round_trip?.duration_minutes),
+      labor_minutes:calc.laborMinutes,
+      total_employed_minutes:calc.laborMinutes+calc.travelMinutes,
+      billed_travel_minutes:calc.travelMinutes,
+      return_travel_time_computed:calc.includeReturnTravelTime,
+      toll_count:calc.tollCount,
+      items:calc.items,
+      prices:{
+        return_travel_time_computed:calc.includeReturnTravelTime,
+        billed_travel_minutes:calc.travelMinutes,
+        visit_labor_raw:calc.visitLaborRaw,
+        visit_labor_rounded:calc.visitLaborRounded,
+        parts:calc.partsCost,
+        total_cash_raw:calc.totalCashRaw,
+        total_cash_rounded:calc.cashRounded,
+        transfer_surcharge_percent:calc.transferSurchargePercent,
+        transfer_surcharge_amount:calc.transferSurchargeAmount,
+        transfer_base:calc.transferBase,
+        iva_percent:calc.ivaPercent,
+        iva_amount:calc.ivaAmount,
+        total_invoice:calc.ivaIncluded
+      },
+      rates:{
+        km:num(cfg.km),
+        travel_hour:num(cfg.travel),
+        labor_hour:num(cfg.labor),
+        toll:num(cfg.toll)
+      }
+    }
+  };
+
+  return payload;
+}
+
+async function issueToHistory(payload){
+  const response=await fetch(ISSUE_URL,{
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'apikey':SUPABASE_PUBLISHABLE,
+      'Authorization':'Bearer '+SUPABASE_PUBLISHABLE
+    },
+    body:JSON.stringify(payload)
+  });
+
+  let data=null;
+  try{
+    data=await response.json();
+  }catch(e){
+    throw new Error('La función de emisión respondió con un formato inválido.');
+  }
+
+  if(!response.ok || !data.ok){
+    const detail=data && data.detail ? ' · '+data.detail : '';
+    throw new Error((data && data.error ? data.error : 'No se pudo emitir')+detail);
+  }
+
+  return data;
+}
+
+$('issueBtn').onclick=async()=>{
+  const status=$('issueStatus');
+
+  status.classList.remove('hidden');
+  status.textContent='Emitiendo y guardando en Historial…';
+  $('issueBtn').disabled=true;
+
+  try{
+    const calc=calculateAmounts();
+    const payload=issuedPayload(calc);
+    const result=await issueToHistory(payload);
+
+    lastIssuedRecord={
+      ...payload,
+      id:result.id,
+      created_at:result.created_at
+    };
+
+    localStorage.setItem('r17_last_issued_v1',JSON.stringify(lastIssuedRecord));
+
+    // Generamos el PDF al emitir. Los botones lo abren o comparten.
+    await PiocaPDF.build(lastIssuedRecord);
+
+    status.textContent='Emitido correctamente, guardado en Historial y PDF generado.';
+    $('issueBtn').textContent='EMITIDO';
+    $('pdfActions').classList.remove('hidden');
+  }catch(e){
+    status.textContent='No se pudo emitir: '+(e.message||String(e));
+    $('issueBtn').disabled=false;
+  }
+};
+
+
+$('openPdfBtn').onclick=async()=>{
+  if(!lastIssuedRecord) return;
+  try{
+    await PiocaPDF.openPdf(lastIssuedRecord);
+  }catch(e){
+    $('issueStatus').classList.remove('hidden');
+    $('issueStatus').textContent='No se pudo abrir el PDF: '+(e.message||String(e));
+  }
+};
+
+$('sharePdfBtn').onclick=async()=>{
+  if(!lastIssuedRecord) return;
+  try{
+    const result=await PiocaPDF.sharePdf(lastIssuedRecord);
+
+    $('issueStatus').classList.remove('hidden');
+
+    if(result && result.shared){
+      $('issueStatus').textContent=
+        'PDF compartido. El mensaje también quedó copiado por si WhatsApp no lo agrega automáticamente.';
+    }else{
+      $('issueStatus').textContent=
+        'El PDF se guardó con su nombre correcto. El mensaje quedó copiado para pegarlo en WhatsApp.';
+    }
+  }catch(e){
+    if(e && e.name==='AbortError') return;
+    $('issueStatus').classList.remove('hidden');
+    $('issueStatus').textContent='No se pudo compartir el PDF: '+(e.message||String(e));
+  }
+};
+
+$('copyMessageBtn').onclick=async()=>{
+  try{
+    const ok=await PiocaPDF.copyMessage();
+    $('issueStatus').classList.remove('hidden');
+    $('issueStatus').textContent=
+      ok
+        ? 'Mensaje copiado.'
+        : 'No se pudo copiar el mensaje automáticamente.';
+  }catch(e){
+    $('issueStatus').classList.remove('hidden');
+    $('issueStatus').textContent='No se pudo copiar el mensaje.';
+  }
+};
+
+$('previewBtn').onclick=()=>{
+  const errorBox=$('previewError');
+
+  errorBox.classList.add('hidden');
+  $('preview').classList.add('hidden');
+  $('issueBtn').classList.add('hidden');
+  $('issueBtn').disabled=false;
+  $('issueBtn').textContent='EMITIR';
+  $('issueStatus').classList.add('hidden');
+  $('pdfActions').classList.add('hidden');
+  lastIssuedRecord=null;
+
+  try{
+    const calc=calculateAmounts();
+    renderCommercialPreview(calc);
+  }catch(e){
+    errorBox.textContent=e.message||String(e);
+    errorBox.classList.remove('hidden');
+  }
+};
+
+
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'){
+    const st=readState();
+    if(st && !st.address && st.lat!=null && st.lng!=null){
+      setTimeout(()=>ensureServiceAddress(),250);
+    }
+    if(st && st.status==='running'){
+      setTimeout(()=>autoLocationCheck(true),500);
+    }
+  }
+});
+
+window.addEventListener('pageshow',()=>{
+  const st=readState();
+  if(st && st.status==='running' && Date.now()-st.startAt>30000){
+    setTimeout(()=>autoLocationCheck(true),700);
+  }
+});
+
+window.addEventListener('focus',()=>{
+  const st=readState();
+  if(st && st.status==='running' && Date.now()-st.startAt>30000){
+    setTimeout(()=>autoLocationCheck(true),700);
+  }
+});
+
+render();
+
+const initialService=readState();
+if(initialService && initialService.status==='running' && Date.now()-initialService.startAt>30000){
+  setTimeout(()=>autoLocationCheck(true),900);
+}
+</script>
+</body>
+</html>
