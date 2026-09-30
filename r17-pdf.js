@@ -277,7 +277,7 @@
     doc.setFontSize(12.5);
     const addressLines=doc.splitTextToSize(r.address,contentW-14);
     const addressH=Math.max(7,addressLines.length*6.3);
-    const infoBoxH=58+addressH;
+    const infoBoxH=45+addressH;
     const boxTop=y;
 
     doc.setFillColor(LIGHT[0],LIGHT[1],LIGHT[2]);
@@ -303,16 +303,6 @@
     doc.setFont('helvetica','normal');
     doc.setFontSize(12);
     setText(GREY);
-    doc.text('Distancia recorrida',margin+7,infoY);
-    doc.setFont('helvetica','bold');
-    setText(DARK);
-    doc.text(r.oneWayKm.toFixed(1)+' km',pageW-margin-7,infoY,{align:'right'});
-
-    infoY+=13;
-
-    doc.setFont('helvetica','normal');
-    doc.setFontSize(12);
-    setText(GREY);
     doc.text('Tiempo empleado en el servicio',margin+7,infoY);
     doc.setFont('helvetica','bold');
     setText(DARK);
@@ -326,11 +316,32 @@
     doc.text('Detalle',margin,y);
     y+=9;
 
-    infoRow(
-      'Costo de visita y mano de obra',
-      money(r.visitRounded),
-      {blue:true,height:17}
+    ensureSpace(29);
+
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(12.5);
+    setText(GREY);
+    doc.text('Visita técnica y mano de obra',margin,y);
+
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(12.5);
+    setText(BLUE);
+    doc.text(money(r.visitRounded),pageW-margin,y,{align:'right'});
+
+    y+=7;
+
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(9.5);
+    setText(GREY);
+    const visitNote=doc.splitTextToSize(
+      'Incluye desplazamiento técnico y recursos operativos necesarios para la atención en domicilio.',
+      contentW
     );
+    doc.text(visitNote,margin,y);
+
+    y+=Math.max(10,visitNote.length*4.8+3);
+    divider();
+    y+=5;
 
     if(r.items.length){
       ensureSpace(12+r.items.length*13);
