@@ -539,9 +539,10 @@ function calculateAmounts(){
 
 function renderCommercialPreview(calc){
   $('previewLocation').textContent=
-    currentContext.mode==='quote'
-      ? currentContext.customerAddress
-      : 'Ubicación GPS registrada al iniciar';
+    currentContext.customerAddress ||
+    (currentContext.mode==='service'
+      ? serviceAddressForHistory()
+      : 'Ubicación registrada');
 
   $('previewTime').textContent=minutesText(calc.laborMinutes + calc.travelMinutes);
   $('previewCash').textContent=money(calc.cashRounded);
@@ -689,6 +690,38 @@ async function enrichServiceAddress(startAt,lat,lng){
   }
 }
 
+
+async function ensureServiceAddress(){
+  let st=readState();
+
+  if(!st || st.lat==null || st.lng==null) return st;
+  if(st.address) return st;
+
+  try{
+    const geo=await reverseGeocode(st.lat,st.lng);
+
+    st=readState();
+    if(!st) return st;
+
+    st.address=geo.address||st.address||null;
+    st.placeId=geo.placeId||st.placeId||null;
+    st.locationType=geo.locationType||st.locationType||null;
+    st.addressError=null;
+    writeState(st);
+    render();
+
+    return st;
+  }catch(e){
+    st=readState();
+    if(st){
+      st.addressError=e.message||String(e);
+      writeState(st);
+      render();
+    }
+    return st;
+  }
+}
+
 function finishServiceState(st,opts={}){
   if(!st || st.status!=='running') return;
 
@@ -769,6 +802,7 @@ async function autoLocationCheck(force=false){
         distanceM:rawDistance,
         position:pos
       });
+      setTimeout(()=>ensureServiceAddress(),150);
     }
   }catch(e){
     // Si una lectura falla, no interrumpimos el servicio.
@@ -806,6 +840,8 @@ function showRunning(st){
 
   if(st.address){
     $('runningLocation').textContent='Ubicación: '+st.address;
+  }else if(st.addressError){
+    $('runningLocation').textContent='Ubicación guardada · dirección pendiente';
   }else if(st.lat!=null){
     $('runningLocation').textContent='Ubicación guardada · obteniendo dirección…';
   }else{
@@ -836,7 +872,9 @@ function showFinished(st){
 
   $('savedLocation').textContent=
     st.address ||
-    (st.lat!=null ? st.lat.toFixed(5)+', '+st.lng.toFixed(5) : 'Ubicación no disponible');
+    (st.lat!=null
+      ? st.lat.toFixed(5)+', '+st.lng.toFixed(5)+' · dirección pendiente'
+      : 'Ubicación no disponible');
 }
 function render(){
   const st=readState();
@@ -902,12 +940,20 @@ $('startService').onclick=()=>{
 $('finishService').onclick=()=>{
   const st=readState();
   finishServiceState(st,{auto:false});
+  setTimeout(()=>ensureServiceAddress(),150);
 };
 
 $('continueService').onclick=async()=>{
-  const st=readState();
+  let st=readState();
   const cfg=readConfig();
   const box=$('serviceRouteState');
+
+  if(st && !st.address && st.lat!=null && st.lng!=null){
+    box.classList.remove('hidden');
+    box.textContent='Obteniendo dirección y calculando ruta…';
+    await ensureServiceAddress();
+    st=readState();
+  }
 
   if(!cfg.base || !String(cfg.base).trim()){
     box.classList.remove('hidden');
@@ -937,7 +983,11 @@ $('continueService').onclick=async()=>{
 
     box.textContent='Ruta calculada correctamente.';
     currentContext={
-      mode:'service'
+      mode:'service',
+      customerAddress:
+        (st && st.address)
+          ? st.address
+          : serviceAddressForHistory()
     };
     showRoute(route);
   }catch(e){
@@ -1341,6 +1391,9 @@ $('previewBtn').onclick=()=>{
 document.addEventListener('visibilitychange',()=>{
   if(document.visibilityState==='visible'){
     const st=readState();
+    if(st && !st.address && st.lat!=null && st.lng!=null){
+      setTimeout(()=>ensureServiceAddress(),250);
+    }
     if(st && st.status==='running'){
       setTimeout(()=>autoLocationCheck(true),500);
     }
