@@ -841,7 +841,7 @@ function showRunning(st){
   if(st.address){
     $('runningLocation').textContent='Ubicación: '+st.address;
   }else if(st.addressError){
-    $('runningLocation').textContent='Ubicación guardada · dirección pendiente';
+    $('runningLocation').textContent='Dirección pendiente · '+st.addressError;
   }else if(st.lat!=null){
     $('runningLocation').textContent='Ubicación guardada · obteniendo dirección…';
   }else{
@@ -873,7 +873,8 @@ function showFinished(st){
   $('savedLocation').textContent=
     st.address ||
     (st.lat!=null
-      ? st.lat.toFixed(5)+', '+st.lng.toFixed(5)+' · dirección pendiente'
+      ? st.lat.toFixed(5)+', '+st.lng.toFixed(5)+
+        (st.addressError ? ' · '+st.addressError : ' · dirección pendiente')
       : 'Ubicación no disponible');
 }
 function render(){
