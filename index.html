@@ -235,7 +235,7 @@
         <h3>Resumen del servicio</h3>
 
         <div class="previewLine">
-          <span>Ubicación</span>
+          <span id="previewLocationLabel">Ubicación</span>
           <b id="previewLocation">—</b>
         </div>
 
@@ -267,8 +267,12 @@
       <button class="verde hidden" id="issueBtn" style="margin-top:14px">EMITIR</button>
       <div id="issueStatus" class="status info hidden"></div>
       <div id="pdfActions" class="hidden" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
-        <button class="claro" id="openPdfBtn" type="button">ABRIR PDF</button>
+        <button class="claro" id="openPdfBtn" type="button">VER PDF</button>
         <button class="azul" id="sharePdfBtn" type="button">COMPARTIR PDF</button>
+        <button class="claro" id="copyMessageBtn" type="button" style="grid-column:1/-1">COPIAR MENSAJE</button>
+        <div class="muted" style="grid-column:1/-1;text-align:center;font-size:12px">
+          Para enviarlo, usá COMPARTIR PDF. El visor puede cambiar el nombre del archivo.
+        </div>
       </div>
     </div>
 
@@ -278,7 +282,7 @@
 </main>
 
 <script src="https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js"></script>
-<script src="r17-pdf.js"></script>
+<script src="r17-pdf.js?v=20260929-4"></script>
 <script>
 const SERVICE_KEY='r17_active_v1';
 const AUTO_CHECK_MS=120000;
@@ -293,6 +297,7 @@ let currentContext=null;
 let lastPreviewCalc=null;
 let lastIssuedRecord=null;
 let selectedCustomerPlaceId=null;
+let selectedCustomerText='';
 let autocompleteTimer=null;
 let autocompleteSeq=0;
 
@@ -368,11 +373,29 @@ function renderAddressSuggestions(items){
     if(secondary.textContent) btn.appendChild(secondary);
 
     btn.onclick=()=>{
-      $('address').value=item.text || item.mainText || '';
+      const selectedText=item.text || item.mainText || '';
+
+      if(autocompleteTimer){
+        clearTimeout(autocompleteTimer);
+        autocompleteTimer=null;
+      }
+
+      autocompleteSeq++;
+      $('address').value=selectedText;
       selectedCustomerPlaceId=item.placeId || null;
+      selectedCustomerText=selectedText.trim();
+
       $('addressConfirmed').classList.toggle('hidden',!selectedCustomerPlaceId);
       $('addressInfo').classList.add('hidden');
       hideAddressSuggestions();
+
+      // En móviles evita que un focus/input tardío vuelva a abrir el menú.
+      setTimeout(()=>{
+        hideAddressSuggestions();
+        if(document.activeElement===$('address')){
+          $('address').blur();
+        }
+      },0);
     };
 
     box.appendChild(btn);
@@ -538,6 +561,11 @@ function calculateAmounts(){
 }
 
 function renderCommercialPreview(calc){
+  $('previewLocationLabel').textContent=
+    currentContext.mode==='service'
+      ? 'Ubicación aproximada del cliente'
+      : 'Ubicación';
+
   $('previewLocation').textContent=
     currentContext.customerAddress ||
     (currentContext.mode==='service'
@@ -1008,16 +1036,28 @@ $('newService').onclick=()=>{
 
 
 $('address').addEventListener('input',()=>{
+  const query=$('address').value.trim();
+
+  // Si el navegador móvil emite un input tardío después de seleccionar,
+  // conservamos la selección y no volvemos a desplegar Google.
+  if(
+    selectedCustomerPlaceId &&
+    selectedCustomerText &&
+    query===selectedCustomerText
+  ){
+    hideAddressSuggestions();
+    return;
+  }
+
   currentRoute=null;
   currentContext=null;
   $('preview').classList.add('hidden');
   $('issueBtn').classList.add('hidden');
   $('issueStatus').classList.add('hidden');
   selectedCustomerPlaceId=null;
+  selectedCustomerText='';
   $('addressConfirmed').classList.add('hidden');
   $('addressInfo').classList.add('hidden');
-
-  const query=$('address').value.trim();
 
   if(autocompleteTimer) clearTimeout(autocompleteTimer);
 
@@ -1042,7 +1082,18 @@ $('address').addEventListener('input',()=>{
 });
 
 $('address').addEventListener('focus',()=>{
-  if($('address').value.trim().length>=3 && !selectedCustomerPlaceId){
+  const value=$('address').value.trim();
+
+  if(
+    selectedCustomerPlaceId &&
+    selectedCustomerText &&
+    value===selectedCustomerText
+  ){
+    hideAddressSuggestions();
+    return;
+  }
+
+  if(value.length>=3){
     $('address').dispatchEvent(new Event('input'));
   }
 });
@@ -1359,11 +1410,35 @@ $('openPdfBtn').onclick=async()=>{
 $('sharePdfBtn').onclick=async()=>{
   if(!lastIssuedRecord) return;
   try{
-    await PiocaPDF.sharePdf(lastIssuedRecord);
+    const result=await PiocaPDF.sharePdf(lastIssuedRecord);
+
+    $('issueStatus').classList.remove('hidden');
+
+    if(result && result.shared){
+      $('issueStatus').textContent=
+        'PDF compartido. El mensaje también quedó copiado por si WhatsApp no lo agrega automáticamente.';
+    }else{
+      $('issueStatus').textContent=
+        'El PDF se guardó con su nombre correcto. El mensaje quedó copiado para pegarlo en WhatsApp.';
+    }
   }catch(e){
     if(e && e.name==='AbortError') return;
     $('issueStatus').classList.remove('hidden');
     $('issueStatus').textContent='No se pudo compartir el PDF: '+(e.message||String(e));
+  }
+};
+
+$('copyMessageBtn').onclick=async()=>{
+  try{
+    const ok=await PiocaPDF.copyMessage();
+    $('issueStatus').classList.remove('hidden');
+    $('issueStatus').textContent=
+      ok
+        ? 'Mensaje copiado.'
+        : 'No se pudo copiar el mensaje automáticamente.';
+  }catch(e){
+    $('issueStatus').classList.remove('hidden');
+    $('issueStatus').textContent='No se pudo copiar el mensaje.';
   }
 };
 
