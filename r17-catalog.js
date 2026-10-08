@@ -5,8 +5,10 @@
   const HISTORY_KEY='r17_catalog_history_v1';
   const CFG_KEY='r17_cfg_v1';
   const DEFAULT_FACTURADO_PCT=12;
-  const DEFAULT_IVA_PCT=21;
+  const DEFAULT_SERVICE_IVA_PCT=21;
+  const DEFAULT_PRODUCT_IVA_PCT=10.5;
   const MAX_HISTORY_EVENTS=30;
+  const GENERAL_SUPPLIER='General / sin especificar';
 
   function n(v){
     const x=Number(String(v??'').replace(',','.'));
@@ -36,14 +38,24 @@
   function ivaPercent(cfg){
     cfg=cfg||readConfig();
     const raw=cfg.iva;
-    if(raw===undefined || String(raw).trim()==='') return DEFAULT_IVA_PCT;
+    if(raw===undefined || String(raw).trim()==='') return DEFAULT_SERVICE_IVA_PCT;
     return Math.max(0,n(raw));
   }
 
-  function commercialPrices(cash,cfg){
+  function productIvaPercent(item,fallback){
+    const raw=item && (item.ivaPercent!==undefined ? item.ivaPercent : item.iva_percent);
+    if(raw===undefined || raw===null || String(raw).trim()===''){
+      return fallback===undefined ? DEFAULT_PRODUCT_IVA_PCT : Math.max(0,n(fallback));
+    }
+    return Math.max(0,n(raw));
+  }
+
+  function commercialPrices(cash,cfg,ivaOverride){
     cash=Math.max(0,n(cash));
     const facturadoPct=invoicePercent(cfg);
-    const iva=ivaPercent(cfg);
+    const iva=(ivaOverride===undefined || ivaOverride===null || String(ivaOverride).trim()==='')
+      ? ivaPercent(cfg)
+      : Math.max(0,n(ivaOverride));
     const invoiceBase=cash*(1+facturadoPct/100);
     const ivaAmount=invoiceBase*(iva/100);
     return {cash,facturadoPct,invoiceBase,ivaPercent:iva,ivaAmount,invoiceTotal:invoiceBase+ivaAmount};
@@ -53,13 +65,17 @@
     raw=raw||{};
     const code=String(raw.code||raw.codigo||'').trim();
     const category=String(raw.category||raw.categoria||'').trim();
-    const product=String(raw.product||raw.producto||'').trim();
+    const supplier=String(
+      raw.supplier || raw.fabricante || raw.proveedor || raw.subcategory || raw.subcategoria || ''
+    ).trim() || GENERAL_SUPPLIER;
+    const product=String(raw.product||raw.producto||raw.modelo||'').trim();
     const description=String(raw.description||raw.descripcion||product||'').trim();
     const price=Math.max(0,n(
       raw.cashPrice!==undefined ? raw.cashPrice :
       raw.precioEfectivo!==undefined ? raw.precioEfectivo :
       raw.price!==undefined ? raw.price : 0
     ));
+    const iva=productIvaPercent(raw,DEFAULT_PRODUCT_IVA_PCT);
     const activeRaw=raw.active!==undefined?raw.active:raw.activo;
     const active=activeRaw===undefined
       ? true
@@ -68,9 +84,11 @@
     return {
       code:code || ('AUTO-'+String(index+1).padStart(4,'0')),
       category,
+      supplier,
       product:product || description || ('Ítem '+(index+1)),
       description:description || product || ('Ítem '+(index+1)),
       cashPrice:price,
+      ivaPercent:iva,
       active
     };
   }
@@ -94,7 +112,7 @@
     try{
       const raw=JSON.parse(localStorage.getItem(HISTORY_KEY)||'[]');
       return Array.isArray(raw)?raw:[];
-    }catch(e){ return []; }
+    }catch(e){return []}
   }
 
   function saveHistory(events){
@@ -107,15 +125,23 @@
     (newItems||[]).forEach(item=>{
       const old=oldMap.get(normalizeText(item.code));
       if(!old){
-        changes.push({code:item.code,product:item.product,oldPrice:null,newPrice:item.cashPrice,type:'nuevo'});
+        changes.push({code:item.code,product:item.product,oldPrice:null,newPrice:item.cashPrice,oldIva:null,newIva:item.ivaPercent,type:'nuevo'});
         return;
       }
-      if(Number(old.cashPrice)!==Number(item.cashPrice)){
-        changes.push({code:item.code,product:item.product,oldPrice:Number(old.cashPrice)||0,newPrice:Number(item.cashPrice)||0,type:'precio'});
+      const priceChanged=Number(old.cashPrice)!==Number(item.cashPrice);
+      const ivaChanged=Number(productIvaPercent(old))!==Number(productIvaPercent(item));
+      const supplierChanged=normalizeText(old.supplier)!==normalizeText(item.supplier);
+      if(priceChanged || ivaChanged || supplierChanged){
+        changes.push({
+          code:item.code,product:item.product,
+          oldPrice:Number(old.cashPrice)||0,newPrice:Number(item.cashPrice)||0,
+          oldIva:productIvaPercent(old),newIva:productIvaPercent(item),
+          type:priceChanged?'precio':(ivaChanged?'iva':'fabricante')
+        });
       }
       oldMap.delete(normalizeText(item.code));
     });
-    oldMap.forEach(old=>changes.push({code:old.code,product:old.product,oldPrice:Number(old.cashPrice)||0,newPrice:null,type:'eliminado'}));
+    oldMap.forEach(old=>changes.push({code:old.code,product:old.product,oldPrice:Number(old.cashPrice)||0,newPrice:null,oldIva:productIvaPercent(old),newIva:null,type:'eliminado'}));
     return changes;
   }
 
@@ -159,10 +185,21 @@
       .sort((a,b)=>a.localeCompare(b,'es'));
   }
 
-  function products(category){
+  function suppliers(category){
     const c=normalizeText(category);
+    return [...new Set(
+      load().items
+        .filter(x=>x.active && normalizeText(x.category)===c)
+        .map(x=>x.supplier||GENERAL_SUPPLIER)
+        .filter(Boolean)
+    )].sort((a,b)=>a.localeCompare(b,'es'));
+  }
+
+  function products(category,supplier){
+    const c=normalizeText(category);
+    const s=normalizeText(supplier||GENERAL_SUPPLIER);
     return load().items
-      .filter(x=>x.active && normalizeText(x.category)===c)
+      .filter(x=>x.active && normalizeText(x.category)===c && normalizeText(x.supplier||GENERAL_SUPPLIER)===s)
       .sort((a,b)=>a.product.localeCompare(b.product,'es'));
   }
 
@@ -201,22 +238,29 @@
     const items=rows.map((row,i)=>{
       const code=String(pick(row,map,['codigo','cod','id'])).trim();
       const category=String(pick(row,map,['categoria','rubro'])).trim();
-      const product=String(pick(row,map,['producto','articulo','item','nombre'])).trim();
+      const supplier=String(pick(row,map,['fabricanteproveedor','fabricante','proveedor','subcategoria','marca'])).trim();
+      const product=String(pick(row,map,['producto','modelo','articulo','item','nombre'])).trim();
       const description=String(pick(row,map,['descripcion','descripcionpresupuesto','detalle'])).trim();
       const priceRaw=pick(row,map,['precioefectivo','efectivo','precio','preciobase']);
+      const ivaRaw=pick(row,map,['iva','ivaporcentaje','iva','alicuotaiva','alicuota']);
       const activeRaw=pick(row,map,['activo','habilitado','estado']);
 
       if(!code && !product && !description && String(priceRaw).trim()==='') return null;
       if(!code) throw new Error('Fila '+(i+2)+': falta Código.');
       if(!category) throw new Error('Fila '+(i+2)+': falta Categoría.');
-      if(!product) throw new Error('Fila '+(i+2)+': falta Producto.');
+      if(!supplier) throw new Error('Fila '+(i+2)+': falta Fabricante / proveedor.');
+      if(!product) throw new Error('Fila '+(i+2)+': falta Producto / modelo.');
       if(String(priceRaw).trim()==='' || !Number.isFinite(Number(String(priceRaw).replace(',','.')))){
         throw new Error('Fila '+(i+2)+': Precio efectivo inválido.');
       }
+      if(String(ivaRaw).trim()==='' || !Number.isFinite(Number(String(ivaRaw).replace(',','.')))){
+        throw new Error('Fila '+(i+2)+': IVA (%) inválido.');
+      }
 
       return normalizeItem({
-        code,category,product,description:description||product,
+        code,category,supplier,product,description:description||product,
         cashPrice:Number(String(priceRaw).replace(',','.')),
+        ivaPercent:Number(String(ivaRaw).replace(',','.')),
         active:activeRaw===''?true:activeRaw
       },i);
     }).filter(Boolean);
@@ -250,22 +294,55 @@
     const preview=previewIncrease(percent);
     if(!preview.items.length) throw new Error('Primero importá un catálogo.');
     const pct=preview.percent;
+    if(pct<=0) throw new Error('Ingresá un porcentaje de aumento mayor a 0.');
     const current=load();
     const changes=[];
     const items=current.items.map(item=>{
       const next=Math.round((item.cashPrice*(1+pct/100))*100)/100;
-      changes.push({code:item.code,product:item.product,oldPrice:item.cashPrice,newPrice:next,type:'aumento'});
+      changes.push({code:item.code,product:item.product,oldPrice:item.cashPrice,newPrice:next,oldIva:item.ivaPercent,newIva:item.ivaPercent,type:'aumento'});
       return {...item,cashPrice:next};
     });
     return persist(items,{action:'aumento_general',percent:pct,source:'configuracion',changes});
+  }
+
+  function previewDiscount(percent){
+    const pct=Number(String(percent??'').replace(',','.'));
+    if(!Number.isFinite(pct)) throw new Error('Ingresá un porcentaje válido.');
+    if(pct<0 || pct>=100) throw new Error('El descuento debe ser mayor o igual a 0 y menor a 100%.');
+    const current=load();
+    return {
+      percent:pct,
+      items:current.items.map(x=>({...x,newCashPrice:Math.round((x.cashPrice*(1-pct/100))*100)/100}))
+    };
+  }
+
+  function applyDiscount(percent){
+    const preview=previewDiscount(percent);
+    if(!preview.items.length) throw new Error('Primero importá un catálogo.');
+    const pct=preview.percent;
+    if(pct<=0) throw new Error('Ingresá un porcentaje de descuento mayor a 0.');
+    const current=load();
+    const changes=[];
+    const items=current.items.map(item=>{
+      const next=Math.round((item.cashPrice*(1-pct/100))*100)/100;
+      changes.push({code:item.code,product:item.product,oldPrice:item.cashPrice,newPrice:next,oldIva:item.ivaPercent,newIva:item.ivaPercent,type:'descuento'});
+      return {...item,cashPrice:next};
+    });
+    return persist(items,{action:'descuento_general',percent:-pct,source:'configuracion',changes});
   }
 
   function workbookCurrent(){
     if(!window.XLSX) throw new Error('No se pudo cargar el generador de Excel.');
     const current=load();
     const rows=current.items.map(item=>({
-      'Código':item.code,'Categoría':item.category,'Producto':item.product,
-      'Descripción':item.description,'Precio efectivo':item.cashPrice,'Activo':item.active?'Sí':'No'
+      'Código':item.code,
+      'Categoría':item.category,
+      'Fabricante / proveedor':item.supplier,
+      'Producto / modelo':item.product,
+      'Descripción':item.description,
+      'Precio efectivo':item.cashPrice,
+      'IVA (%)':item.ivaPercent,
+      'Activo':item.active?'Sí':'No'
     }));
     const historyRows=[];
     loadHistory().forEach(ev=>{
@@ -274,16 +351,17 @@
         'Fecha':ev.at||'','Versión anterior':ev.fromVersion??'','Versión nueva':ev.toVersion??'',
         'Acción':ev.action||'','Porcentaje':ev.percent??'','Código':ch.code||'',
         'Producto':ch.product||'','Precio anterior':ch.oldPrice??'','Precio nuevo':ch.newPrice??'',
-        'Tipo de cambio':ch.type||''
+        'IVA anterior':ch.oldIva??'','IVA nuevo':ch.newIva??'','Tipo de cambio':ch.type||''
       }));
     });
     const wb=XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows.length?rows:[{
-      'Código':'','Categoría':'','Producto':'','Descripción':'','Precio efectivo':'','Activo':'Sí'
+      'Código':'','Categoría':'','Fabricante / proveedor':'','Producto / modelo':'','Descripción':'',
+      'Precio efectivo':'','IVA (%)':DEFAULT_PRODUCT_IVA_PCT,'Activo':'Sí'
     }]),'CATALOGO');
     XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(historyRows.length?historyRows:[{
       'Fecha':'','Versión anterior':'','Versión nueva':'','Acción':'','Porcentaje':'',
-      'Código':'','Producto':'','Precio anterior':'','Precio nuevo':'','Tipo de cambio':''
+      'Código':'','Producto':'','Precio anterior':'','Precio nuevo':'','IVA anterior':'','IVA nuevo':'','Tipo de cambio':''
     }]),'HISTORIAL_CAMBIOS');
     return wb;
   }
@@ -292,16 +370,20 @@
     if(!window.XLSX) throw new Error('No se pudo cargar el generador de Excel.');
     const wb=XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet([
-      {'Código':'ELE001','Categoría':'Electrónica','Producto':'Central electrónica','Descripción':'Recambio de central electrónica','Precio efectivo':'','Activo':'Sí'},
-      {'Código':'CON001','Categoría':'Controles remotos','Producto':'Control remoto','Descripción':'Control remoto para automatización','Precio efectivo':'','Activo':'Sí'},
-      {'Código':'SEN001','Categoría':'Sensores','Producto':'Sensores infrarrojos','Descripción':'Recambio de sensores infrarrojos','Precio efectivo':'','Activo':'Sí'},
-      {'Código':'CAP001','Categoría':'Capacitores','Producto':'Capacitor','Descripción':'Recambio de capacitor de arranque','Precio efectivo':'','Activo':'Sí'},
-      {'Código':'FIN001','Categoría':'Finales de carrera','Producto':'Sensor de final de carrera','Descripción':'Recambio de sensor de final de carrera','Precio efectivo':'','Activo':'Sí'}
+      {'Código':'ELE001','Categoría':'Electrónica','Fabricante / proveedor':'Nice','Producto / modelo':'MC824H','Descripción':'Recambio de central electrónica','Precio efectivo':'','IVA (%)':10.5,'Activo':'Sí'},
+      {'Código':'ELE002','Categoría':'Electrónica','Fabricante / proveedor':'BFT','Producto / modelo':'Thalia','Descripción':'Recambio de central electrónica','Precio efectivo':'','IVA (%)':10.5,'Activo':'Sí'},
+      {'Código':'CON001','Categoría':'Controles remotos','Fabricante / proveedor':'Nice','Producto / modelo':'ON2E','Descripción':'Control remoto para automatización','Precio efectivo':'','IVA (%)':10.5,'Activo':'Sí'},
+      {'Código':'SEN001','Categoría':'Sensores','Fabricante / proveedor':'Genérico','Producto / modelo':'Par infrarrojo','Descripción':'Recambio de sensores infrarrojos','Precio efectivo':'','IVA (%)':10.5,'Activo':'Sí'},
+      {'Código':'CAP001','Categoría':'Capacitores','Fabricante / proveedor':'Genérico','Producto / modelo':'12,5 µF','Descripción':'Recambio de capacitor de arranque','Precio efectivo':'','IVA (%)':10.5,'Activo':'Sí'}
     ]),'CATALOGO');
     XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([
       ['CATÁLOGO piOca®'],
-      ['El único precio editable es Precio efectivo.'],
-      ['Facturado e IVA se calculan automáticamente desde Configuración.'],
+      ['Cada fila es un producto/modelo concreto.'],
+      ['Categoría → Fabricante / proveedor → Producto / modelo.'],
+      ['Fabricante / proveedor es un dato interno de búsqueda y no se imprime en el presupuesto.'],
+      ['Precio efectivo es el único precio comercial que se carga manualmente.'],
+      ['IVA (%) corresponde a cada producto. Para repuestos suele ser 10,5%, pero puede variar por fila.'],
+      ['El diferencial efectivo → facturado se aplica automáticamente antes del IVA.'],
       ['Código debe ser único y estable para actualizar presupuestos históricos.'],
       ['Activo: Sí / No.']
     ]),'LEEME');
@@ -333,8 +415,10 @@
   }
 
   window.PiocaCatalog={
-    CATALOG_KEY,HISTORY_KEY,CFG_KEY,load,loadHistory,activeCount,categories,products,
-    findByCode,findMatch,importFile,previewIncrease,applyIncrease,commercialPrices,
-    invoicePercent,ivaPercent,downloadCurrent,downloadTemplate,normalizeText,persist
+    CATALOG_KEY,HISTORY_KEY,CFG_KEY,
+    DEFAULT_PRODUCT_IVA_PCT,GENERAL_SUPPLIER,
+    load,loadHistory,activeCount,categories,suppliers,products,
+    findByCode,findMatch,importFile,previewIncrease,applyIncrease,previewDiscount,applyDiscount,commercialPrices,
+    invoicePercent,ivaPercent,productIvaPercent,downloadCurrent,downloadTemplate,normalizeText,persist
   };
 })();
