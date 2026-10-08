@@ -126,8 +126,8 @@ jobs:
                   applicationId 'ar.com.pioca.cotizador'
                   minSdk 26
                   targetSdk 35
-                  versionCode 1
-                  versionName '1.0'
+                  versionCode 2
+                  versionName '1.1-catalogo'
               }
 
               signingConfigs {
@@ -238,6 +238,7 @@ jobs:
           import android.content.ClipData;
           import android.content.Context;
           import android.content.Intent;
+          import android.content.ContentValues;
           import android.content.IntentFilter;
           import android.content.SharedPreferences;
           import android.content.pm.PackageManager;
@@ -245,11 +246,14 @@ jobs:
           import android.os.Build;
           import android.os.Bundle;
           import android.os.PowerManager;
+          import android.os.Environment;
           import android.provider.Settings;
+          import android.provider.MediaStore;
           import android.util.Base64;
           import android.webkit.GeolocationPermissions;
           import android.webkit.JavascriptInterface;
           import android.webkit.WebChromeClient;
+          import android.webkit.ValueCallback;
           import android.webkit.WebSettings;
           import android.webkit.WebView;
           import android.webkit.WebViewClient;
@@ -261,6 +265,7 @@ jobs:
 
           import java.io.File;
           import java.io.FileOutputStream;
+          import java.io.OutputStream;
 
           public class MainActivity extends Activity {
 
@@ -271,6 +276,7 @@ jobs:
               private static final int REQ_LOCATION = 1001;
               private static final int REQ_BACKGROUND = 1002;
               private static final int REQ_NOTIFICATIONS = 1003;
+              private static final int REQ_FILE_CHOOSER = 1004;
 
               private WebView webView;
               private boolean pageReady = false;
@@ -278,6 +284,7 @@ jobs:
               private boolean batteryDialogShown = false;
               private GeolocationPermissions.Callback pendingGeoCallback;
               private String pendingGeoOrigin;
+              private ValueCallback<Uri[]> filePathCallback;
 
               private final BroadcastReceiver autoFinishReceiver = new BroadcastReceiver() {
                   @Override
@@ -326,6 +333,28 @@ jobs:
                               pendingGeoOrigin = origin;
                               pendingGeoCallback = callback;
                               requestLocationPermission();
+                          }
+                      }
+
+                      @Override
+                      public boolean onShowFileChooser(
+                              WebView webView,
+                              ValueCallback<Uri[]> callback,
+                              FileChooserParams fileChooserParams) {
+
+                          if (filePathCallback != null) {
+                              filePathCallback.onReceiveValue(null);
+                          }
+                          filePathCallback = callback;
+
+                          try {
+                              Intent intent = fileChooserParams.createIntent();
+                              intent.addCategory(Intent.CATEGORY_OPENABLE);
+                              startActivityForResult(intent, REQ_FILE_CHOOSER);
+                              return true;
+                          } catch (Exception e) {
+                              filePathCallback = null;
+                              return false;
                           }
                       }
                   });
@@ -476,6 +505,22 @@ jobs:
                       }
                   } else if (requestCode == REQ_BACKGROUND || requestCode == REQ_NOTIFICATIONS) {
                       beginPermissionFlow();
+                  }
+              }
+
+              @Override
+              protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+                  super.onActivityResult(requestCode, resultCode, data);
+
+                  if (requestCode == REQ_FILE_CHOOSER) {
+                      Uri[] result = null;
+                      if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                          result = new Uri[]{data.getData()};
+                      }
+                      if (filePathCallback != null) {
+                          filePathCallback.onReceiveValue(result);
+                          filePathCallback = null;
+                      }
                   }
               }
 
@@ -777,6 +822,58 @@ jobs:
                   }).start();
               }
 
+              private void saveFileNative(String dataUrl, String requestedName, String mimeType) {
+                  new Thread(() -> {
+                      try {
+                          int comma = dataUrl.indexOf(',');
+                          String b64 = comma >= 0 ? dataUrl.substring(comma + 1) : dataUrl;
+                          byte[] bytes = Base64.decode(b64, Base64.DEFAULT);
+                          String name = requestedName == null || requestedName.trim().isEmpty()
+                                  ? "Catalogo_piOca.xlsx"
+                                  : requestedName.replaceAll("[\\\\/:*?\"<>|]", "_");
+                          String type = mimeType == null || mimeType.trim().isEmpty()
+                                  ? "application/octet-stream"
+                                  : mimeType;
+
+                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                              ContentValues values = new ContentValues();
+                              values.put(MediaStore.Downloads.DISPLAY_NAME, name);
+                              values.put(MediaStore.Downloads.MIME_TYPE, type);
+                              values.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/piOca");
+                              values.put(MediaStore.Downloads.IS_PENDING, 1);
+                              Uri uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                              if (uri == null) throw new Exception("No se pudo crear el archivo");
+                              try (OutputStream out = getContentResolver().openOutputStream(uri)) {
+                                  if (out == null) throw new Exception("No se pudo abrir el archivo");
+                                  out.write(bytes);
+                              }
+                              values.clear();
+                              values.put(MediaStore.Downloads.IS_PENDING, 0);
+                              getContentResolver().update(uri, values, null, null);
+                          } else {
+                              File dir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+                              if (dir == null) dir = getFilesDir();
+                              File file = new File(dir, name);
+                              try (FileOutputStream fos = new FileOutputStream(file)) {
+                                  fos.write(bytes);
+                              }
+                          }
+
+                          runOnUiThread(() -> Toast.makeText(
+                                  this,
+                                  "Catálogo guardado en Descargas/piOca",
+                                  Toast.LENGTH_LONG
+                          ).show());
+                      } catch (Exception e) {
+                          runOnUiThread(() -> Toast.makeText(
+                                  this,
+                                  "No se pudo guardar el catálogo: " + e.getMessage(),
+                                  Toast.LENGTH_LONG
+                          ).show());
+                      }
+                  }).start();
+              }
+
               public class NativeBridge {
                   @JavascriptInterface
                   public void syncServiceState(String json) {
@@ -791,6 +888,11 @@ jobs:
                   @JavascriptInterface
                   public void sharePdf(String dataUrl, String fileName, String message) {
                       sharePdfNative(dataUrl, fileName, message);
+                  }
+
+                  @JavascriptInterface
+                  public void saveFile(String dataUrl, String fileName, String mimeType) {
+                      saveFileNative(dataUrl, fileName, mimeType);
                   }
               }
 
@@ -997,8 +1099,7 @@ jobs:
                                       .setPackage(getPackageName())
                       );
                       stopSelf();
-                  }
-              }
+                  }}}
 
               private void saveAutoFinish(Location location, double rawDistance) {
                   long endAt = System.currentTimeMillis();
@@ -1107,11 +1208,11 @@ jobs:
 
       - name: Preparar APK final
         run: |
-          cp android-cotizador/app/build/outputs/apk/release/app-release.apk piOca-Cotizador-V1.apk
+          cp android-cotizador/app/build/outputs/apk/release/app-release.apk piOca-Cotizador-V2-Catalogo.apk
 
       - name: Subir APK
         uses: actions/upload-artifact@v4
         with:
-          name: piOca-Cotizador-APK-V1
-          path: piOca-Cotizador-V1.apk
+          name: piOca-Cotizador-APK-V2-Catalogo
+          path: piOca-Cotizador-V2-Catalogo.apk
           retention-days: 90
