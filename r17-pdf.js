@@ -91,18 +91,18 @@
         ? n(prices.visit_labor_rounded)
         : Math.max(0,cash-itemTotal);
 
-    const ivaPercent=
-      record.iva_percent!==undefined
-        ? n(record.iva_percent)
-        : (prices.iva_percent!==undefined?n(prices.iva_percent):21);
+    const serviceIvaPercent=
+      prices.service_iva_percent!==undefined
+        ? n(prices.service_iva_percent)
+        : (record.iva_percent!==undefined
+            ? n(record.iva_percent)
+            : (prices.iva_percent!==undefined?n(prices.iva_percent):21));
 
     const transferSurchargePercent=
       prices.transfer_surcharge_percent!==undefined
         ? n(prices.transfer_surcharge_percent)
         : 12;
 
-    // Los registros nuevos guardan transfer_base con el diferencial comercial vigente.
-    // Los registros viejos conservan su comportamiento histórico.
     const transferBase=
       record.transfer_base!==undefined
         ? n(record.transfer_base)
@@ -115,7 +115,7 @@
         ? n(record.total_invoice)
         : (prices.total_invoice!==undefined
             ? n(prices.total_invoice)
-            : transferBase*(1+ivaPercent/100));
+            : transferBase*(1+serviceIvaPercent/100));
 
     const ivaAmount=
       record.iva_amount!==undefined
@@ -123,6 +123,12 @@
         : (prices.iva_amount!==undefined
             ? n(prices.iva_amount)
             : Math.max(0,invoice-transferBase));
+
+    const taxModel=String(snap.tax_model||prices.tax_model||'legacy').trim();
+    const mixedTax=taxModel==='mixed_v2' || Array.isArray(prices.iva_breakdown);
+    const ivaBreakdown=Array.isArray(prices.iva_breakdown) && prices.iva_breakdown.length
+      ? prices.iva_breakdown.map(x=>({percent:n(x.percent),base:n(x.base),amount:n(x.amount)}))
+      : [{percent:serviceIvaPercent,base:transferBase,amount:ivaAmount}];
 
     const rawCustomerType=String(
       record.customer_type ||
@@ -154,9 +160,12 @@
       cash,
       transferBase,
       transferSurchargePercent,
-      ivaPercent,
+      ivaPercent:serviceIvaPercent,
+      serviceIvaPercent,
+      ivaBreakdown,
       ivaAmount,
       invoice,
+      mixedTax,
       customerType
     };
   }
@@ -283,7 +292,7 @@
     doc.setFontSize(12.5);
     const addressLines=doc.splitTextToSize(r.address,contentW-14);
     const addressH=Math.max(7,addressLines.length*6.3);
-    const infoBoxH=58+addressH;
+    const infoBoxH=45+addressH;
     const boxTop=y;
 
     doc.setFillColor(LIGHT[0],LIGHT[1],LIGHT[2]);
@@ -306,16 +315,8 @@
 
     infoY+=addressH+8;
 
-    doc.setFont('helvetica','normal');
-    doc.setFontSize(12);
-    setText(GREY);
-    doc.text('Distancia recorrida',margin+7,infoY);
-    doc.setFont('helvetica','bold');
-    setText(DARK);
-    doc.text(r.oneWayKm.toFixed(1)+' km',pageW-margin-7,infoY,{align:'right'});
-
-    infoY+=13;
-
+    // El resumen para el cliente no muestra kilómetros ni distancia recorrida.
+    // La distancia queda disponible únicamente en el historial/detalle interno.
     doc.setFont('helvetica','normal');
     doc.setFontSize(12);
     setText(GREY);
@@ -350,8 +351,9 @@
         const qty=Math.max(1,n(item.qty));
         const desc=String(item.desc||'Ítem');
         const cashTotal=qty*n(item.price);
+        const itemIva=(r.mixedTax && item.iva_percent!==undefined) ? n(item.iva_percent) : r.ivaPercent;
         const factBase=cashTotal*(1+r.transferSurchargePercent/100);
-        const factFinal=factBase*(1+r.ivaPercent/100);
+        const factFinal=factBase*(1+itemIva/100);
 
         doc.setFont('helvetica','normal');
         doc.setFontSize(12);
@@ -366,11 +368,11 @@
         if(r.customerType==='consorcio'){
           doc.text(money(factFinal),pageW-margin-7,y,{align:'right'});
         }else if(r.customerType==='industria'){
-          doc.text(money(factBase)+' + IVA',pageW-margin-7,y,{align:'right'});
+          doc.text(money(factBase)+' + IVA '+itemIva.toLocaleString('es-AR',{maximumFractionDigits:2})+'%',pageW-margin-7,y,{align:'right'});
         }else{
           doc.text(money(cashTotal)+' ef.',pageW-margin-7,y,{align:'right'});
           doc.setFont('helvetica','normal');doc.setFontSize(9.5);setText(GREY);
-          doc.text(money(factBase)+' + IVA',pageW-margin-7,y+5,{align:'right'});
+          doc.text(money(factBase)+' + IVA '+itemIva.toLocaleString('es-AR',{maximumFractionDigits:2})+'%',pageW-margin-7,y+5,{align:'right'});
         }
 
         y+=Math.max(12,detailLines.length*6.2+6);
@@ -381,114 +383,75 @@
       y+=3;
     }
 
+    function drawTaxRows(boxY,startOffset){
+      let yy=boxY+startOffset;
+      r.ivaBreakdown.forEach(row=>{
+        doc.setFont('helvetica','normal');
+        doc.setFontSize(11.5);
+        setText(GREY);
+        doc.text('IVA ('+row.percent.toLocaleString('es-AR',{maximumFractionDigits:2})+'%)',margin+7,yy);
+        doc.setFont('helvetica','bold');
+        setText(DARK);
+        doc.text(money(row.amount),pageW-margin-7,yy,{align:'right'});
+        yy+=12;
+      });
+      return yy;
+    }
+
     if(r.customerType==='particular'){
-      // Particular conserva exactamente las tres alternativas comerciales actuales.
-      ensureSpace(76);
+      const taxRows=Math.max(1,r.ivaBreakdown.length);
+      const invoiceH=35+taxRows*12;
+      ensureSpace(33+invoiceH);
 
       doc.setFillColor(LIGHT[0],LIGHT[1],LIGHT[2]);
       doc.setDrawColor(BORDER[0],BORDER[1],BORDER[2]);
       doc.roundedRect(margin,y,contentW,21,4,4,'FD');
-
-      doc.setFont('helvetica','normal');
-      doc.setFontSize(13);
-      setText(GREY);
+      doc.setFont('helvetica','normal');doc.setFontSize(13);setText(GREY);
       doc.text('Descuento por pago efectivo',margin+7,y+13);
-
-      doc.setFont('helvetica','bold');
-      doc.setFontSize(17);
-      setText(GREEN);
+      doc.setFont('helvetica','bold');doc.setFontSize(17);setText(GREEN);
       doc.text(money(r.cash),pageW-margin-7,y+13.2,{align:'right'});
-
       y+=27;
 
-      doc.setFillColor(255,255,255);
-      doc.setDrawColor(193,208,226);
-      doc.setLineWidth(.45);
-      doc.roundedRect(margin,y,contentW,43,4,4,'FD');
-
-      doc.setFont('helvetica','normal');
-      doc.setFontSize(12.5);
-      setText(GREY);
-      doc.text('Precio por transferencia + IVA',margin+7,y+13);
-
-      doc.setFont('helvetica','bold');
-      doc.setFontSize(13.5);
-      setText(DARK);
-      doc.text(money(r.transferBase)+' + IVA',pageW-margin-7,y+13,{align:'right'});
-
+      doc.setFillColor(255,255,255);doc.setDrawColor(193,208,226);doc.setLineWidth(.45);
+      doc.roundedRect(margin,y,contentW,invoiceH,4,4,'FD');
+      doc.setFont('helvetica','normal');doc.setFontSize(12.5);setText(GREY);
+      doc.text('Facturado sin IVA',margin+7,y+13);
+      doc.setFont('helvetica','bold');doc.setFontSize(13.5);setText(DARK);
+      doc.text(money(r.transferBase),pageW-margin-7,y+13,{align:'right'});
+      let finalY=drawTaxRows(y,27);
       doc.setDrawColor(BORDER[0],BORDER[1],BORDER[2]);
-      doc.line(margin+7,y+21,pageW-margin-7,y+21);
-
-      doc.setFont('helvetica','normal');
-      doc.setFontSize(12.5);
-      setText(GREY);
-      doc.text('Precio final IVA incluido',margin+7,y+34);
-
-      doc.setFont('helvetica','bold');
-      doc.setFontSize(16);
-      setText(BLUE);
-      doc.text(money(r.invoice),pageW-margin-7,y+34,{align:'right'});
+      doc.line(margin+7,finalY-6,pageW-margin-7,finalY-6);
+      doc.setFont('helvetica','normal');doc.setFontSize(12.5);setText(GREY);
+      doc.text('Precio final IVA incluido',margin+7,finalY+5);
+      doc.setFont('helvetica','bold');doc.setFontSize(16);setText(BLUE);
+      doc.text(money(r.invoice),pageW-margin-7,finalY+5,{align:'right'});
 
     }else if(r.customerType==='consorcio'){
-      // Consorcio / edificio se factura siempre: al cliente se le muestra sólo el total final.
       ensureSpace(34);
-
-      doc.setFillColor(255,255,255);
-      doc.setDrawColor(193,208,226);
-      doc.setLineWidth(.45);
+      doc.setFillColor(255,255,255);doc.setDrawColor(193,208,226);doc.setLineWidth(.45);
       doc.roundedRect(margin,y,contentW,28,4,4,'FD');
-
-      doc.setFont('helvetica','normal');
-      doc.setFontSize(12.5);
-      setText(GREY);
+      doc.setFont('helvetica','normal');doc.setFontSize(12.5);setText(GREY);
       doc.text('Total final IVA incluido',margin+7,y+17);
-
-      doc.setFont('helvetica','bold');
-      doc.setFontSize(17);
-      setText(BLUE);
+      doc.setFont('helvetica','bold');doc.setFontSize(17);setText(BLUE);
       doc.text(money(r.invoice),pageW-margin-7,y+17,{align:'right'});
 
     }else{
-      // Industria: subtotal facturado, IVA discriminado y total final.
-      ensureSpace(64);
-
-      doc.setFillColor(255,255,255);
-      doc.setDrawColor(193,208,226);
-      doc.setLineWidth(.45);
-      doc.roundedRect(margin,y,contentW,57,4,4,'FD');
-
-      doc.setFont('helvetica','normal');
-      doc.setFontSize(12.5);
-      setText(GREY);
+      const taxRows=Math.max(1,r.ivaBreakdown.length);
+      const boxH=35+taxRows*12;
+      ensureSpace(boxH+8);
+      doc.setFillColor(255,255,255);doc.setDrawColor(193,208,226);doc.setLineWidth(.45);
+      doc.roundedRect(margin,y,contentW,boxH,4,4,'FD');
+      doc.setFont('helvetica','normal');doc.setFontSize(12.5);setText(GREY);
       doc.text('Subtotal facturado',margin+7,y+13);
-
-      doc.setFont('helvetica','bold');
-      doc.setFontSize(13.5);
-      setText(DARK);
+      doc.setFont('helvetica','bold');doc.setFontSize(13.5);setText(DARK);
       doc.text(money(r.transferBase),pageW-margin-7,y+13,{align:'right'});
-
-      doc.setFont('helvetica','normal');
-      doc.setFontSize(12.5);
-      setText(GREY);
-      doc.text('IVA ('+r.ivaPercent+'%)',margin+7,y+28);
-
-      doc.setFont('helvetica','bold');
-      doc.setFontSize(13.5);
-      setText(DARK);
-      doc.text(money(r.ivaAmount),pageW-margin-7,y+28,{align:'right'});
-
+      let finalY=drawTaxRows(y,27);
       doc.setDrawColor(BORDER[0],BORDER[1],BORDER[2]);
-      doc.line(margin+7,y+36,pageW-margin-7,y+36);
-
-      doc.setFont('helvetica','normal');
-      doc.setFontSize(12.5);
-      setText(GREY);
-      doc.text('Total con IVA',margin+7,y+49);
-
-      doc.setFont('helvetica','bold');
-      doc.setFontSize(16);
-      setText(BLUE);
-      doc.text(money(r.invoice),pageW-margin-7,y+49,{align:'right'});
+      doc.line(margin+7,finalY-6,pageW-margin-7,finalY-6);
+      doc.setFont('helvetica','normal');doc.setFontSize(12.5);setText(GREY);
+      doc.text('Total con IVA',margin+7,finalY+5);
+      doc.setFont('helvetica','bold');doc.setFontSize(16);setText(BLUE);
+      doc.text(money(r.invoice),pageW-margin-7,finalY+5,{align:'right'});
     }
 
     doc.setFont('helvetica','normal');
