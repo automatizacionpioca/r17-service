@@ -144,7 +144,7 @@
   <section class="body">
     <div class="card">
       <h2>Política comercial</h2>
-      <p>Estos parámetros se aplican a toda la aplicación. El diferencial se calcula antes de impuestos.</p>
+      <p>El diferencial efectivo → facturado se aplica antes de impuestos. Mano de obra, traslado, kilómetros y peajes usan el IVA de servicios; los productos usan el IVA indicado en cada fila del catálogo.</p>
       <div class="policyGrid">
         <div>
           <label for="facturadoPct">Diferencial efectivo → facturado (%)</label>
@@ -152,7 +152,7 @@
           <div class="updatedAt" id="facturadoPctUpdated">Última actualización: sin registro</div>
         </div>
         <div>
-          <label for="iva">IVA (%)</label>
+          <label for="iva">IVA servicios (%)</label>
           <input id="iva" type="number" min="0" step="0.01" inputmode="decimal" value="21">
           <div class="updatedAt" id="ivaUpdated">Última actualización: sin registro</div>
         </div>
@@ -253,7 +253,7 @@
 
     <div class="card">
       <h2>Catálogo de accesorios y repuestos</h2>
-      <p>El Excel contiene un único precio: efectivo. Facturado e IVA se calculan automáticamente.</p>
+      <p>El Excel contiene un único precio: efectivo. Cada producto define su IVA y se organiza por Categoría → Fabricante / proveedor → Producto / modelo.</p>
 
       <input id="catalogFile" type="file" accept=".xlsx,.xls" class="hidden">
       <div class="catalogActions">
@@ -264,11 +264,18 @@
 
       <div class="catalogSummary" id="catalogSummary">Catálogo sin cargar.</div>
 
-      <label for="catalogIncrease">Aplicar aumento al catálogo vigente (%)</label>
-      <input id="catalogIncrease" type="number" step="0.01" inputmode="decimal" value="0">
+      <label for="catalogIncrease">Incrementar catálogo vigente (%)</label>
+      <input id="catalogIncrease" type="number" min="0" step="0.01" inputmode="decimal" value="0">
       <div class="catalogActions" style="margin-top:10px">
-        <button class="claro" id="previewIncrease" type="button">VER NUEVOS PRECIOS</button>
+        <button class="claro" id="previewIncrease" type="button">VER AUMENTO</button>
         <button class="verde" id="applyIncrease" type="button">APLICAR AUMENTO</button>
+      </div>
+
+      <label for="catalogDiscount" style="margin-top:18px">Aplicar descuento al catálogo vigente (%)</label>
+      <input id="catalogDiscount" type="number" min="0" max="99.99" step="0.01" inputmode="decimal" value="0">
+      <div class="catalogActions" style="margin-top:10px">
+        <button class="claro" id="previewDiscount" type="button">VER DESCUENTO</button>
+        <button class="oscuro" id="applyDiscount" type="button">APLICAR DESCUENTO</button>
       </div>
       <div class="catalogPreview hidden" id="catalogPreview"></div>
       <div class="status ok hidden" id="catalogOk"></div>
@@ -281,7 +288,7 @@
 </main>
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="r17-catalog.js?v=20261008-1"></script>
+<script src="r17-catalog.js?v=20261008-3"></script>
 <script>
 const ids=['base','km','travel','labor','toll','iva','facturadoPct','consorcioPct','industriaPct'];
 const trackedIds=['km','travel','labor','toll','iva','facturadoPct','consorcioPct','industriaPct'];
@@ -378,8 +385,12 @@ function renderClientRates(){
 function renderCommercialPolicy(){
   const cash=100000;
   const cfg={facturadoPct:configNumber('facturadoPct')??12,iva:configNumber('iva')??21};
-  const p=PiocaCatalog.commercialPrices(cash,cfg);
-  $('commercialPreview').textContent='Ejemplo sobre $100.000 efectivo: facturado '+money(p.invoiceBase)+' + IVA · final '+money(p.invoiceTotal);
+  const service=PiocaCatalog.commercialPrices(cash,cfg,cfg.iva);
+  const product=PiocaCatalog.commercialPrices(cash,cfg,10.5);
+  $('commercialPreview').innerHTML=
+    'Sobre <b>$100.000 efectivo</b>, el facturado sin impuestos queda en <b>'+money(service.invoiceBase)+'</b>.'+
+    '<br>Servicio IVA '+new Intl.NumberFormat('es-AR',{maximumFractionDigits:2}).format(cfg.iva)+'%: <b>'+money(service.invoiceTotal)+'</b> final.'+
+    '<br>Producto con IVA 10,5%: <b>'+money(product.invoiceTotal)+'</b> final.';
 }
 
 function saveCommercialPolicy(){
@@ -403,14 +414,26 @@ function saveCommercialPolicy(){
   setTimeout(()=>$('commercialSaved').classList.add('hidden'),1800);
 }
 
+function catalogActionLabel(h){
+  const action=String((h&&h.action)||'').toLowerCase();
+  const pct=Number(h&&h.percent);
+  if(action==='aumento_general') return 'Aumento '+(Number.isFinite(pct)?('+'+Math.abs(pct)+'%'):'');
+  if(action==='descuento_general') return 'Descuento '+(Number.isFinite(pct)?('-'+Math.abs(pct)+'%'):'');
+  if(action==='importacion_excel') return 'Importación de Excel';
+  return String((h&&h.action)||'Actualización').replaceAll('_',' ');
+}
+
 function renderCatalog(){
   const cat=PiocaCatalog.load();
   const active=cat.items.filter(x=>x.active).length;
   const date=cat.updatedAt ? formatUpdateDate(cat.updatedAt) : 'sin registro';
-  $('catalogSummary').innerHTML='<b>Versión '+cat.version+'</b> · '+active+' artículos activos · Última actualización: '+date;
-  const hist=PiocaCatalog.loadHistory().slice(-5).reverse();
+  const allHist=PiocaCatalog.loadHistory();
+  const latest=allHist.length ? allHist[allHist.length-1] : null;
+  const latestText=latest ? (formatUpdateDate(latest.at)+' · '+catalogActionLabel(latest)) : 'sin movimientos';
+  $('catalogSummary').innerHTML='<b>Versión '+cat.version+'</b> · '+active+' artículos activos · Última actualización: '+date+'<br><span style="font-size:12px">Último movimiento: '+latestText+'</span>';
+  const hist=allHist.slice(-5).reverse();
   $('catalogHistory').innerHTML=hist.length
-    ? '<b>Últimos cambios</b><br>'+hist.map(h=>formatUpdateDate(h.at)+' · '+String(h.action||'').replaceAll('_',' ')+(h.percent!==null&&h.percent!==undefined?' · '+h.percent+'%':'')).join('<br>')
+    ? '<b>Últimos cambios</b><br>'+hist.map(h=>formatUpdateDate(h.at)+' · '+catalogActionLabel(h)).join('<br>')
     : 'Sin historial de cambios.';
   $('downloadCatalog').disabled=cat.items.length===0;
 }
@@ -686,11 +709,33 @@ $('applyIncrease').onclick=()=>{
   $('catalogError').classList.add('hidden');$('catalogOk').classList.add('hidden');
   try{
     const pct=Number(String($('catalogIncrease').value).replace(',','.'));
-    if(!Number.isFinite(pct)) throw new Error('Ingresá un porcentaje válido.');
-    if(!confirm('¿Aplicar '+pct+'% al precio efectivo de TODO el catálogo vigente?')) return;
+    if(!Number.isFinite(pct) || pct<=0) throw new Error('Ingresá un porcentaje de aumento mayor a 0.');
+    if(!confirm('¿AUMENTAR '+pct+'% el precio efectivo de TODO el catálogo vigente?')) return;
     const cat=PiocaCatalog.applyIncrease(pct);
     $('catalogIncrease').value='0';$('catalogPreview').classList.add('hidden');
-    $('catalogOk').textContent='Aumento aplicado. Catálogo versión '+cat.version+'.';$('catalogOk').classList.remove('hidden');renderCatalog();
+    $('catalogOk').textContent='Aumento aplicado y registrado con fecha. Catálogo versión '+cat.version+'.';$('catalogOk').classList.remove('hidden');renderCatalog();
+  }catch(e){$('catalogError').textContent=e.message||String(e);$('catalogError').classList.remove('hidden')}
+};
+
+$('previewDiscount').onclick=()=>{
+  try{
+    const p=PiocaCatalog.previewDiscount($('catalogDiscount').value);
+    if(!p.items.length) throw new Error('Primero importá un catálogo.');
+    const sample=p.items.filter(x=>x.active).slice(0,5);
+    $('catalogPreview').innerHTML='<b>Vista previa descuento -'+p.percent+'%</b><br>'+sample.map(x=>x.product+': '+money(x.cashPrice)+' → '+money(x.newCashPrice)).join('<br>')+(p.items.length>5?'<br>…':'');
+    $('catalogPreview').classList.remove('hidden');
+  }catch(e){$('catalogError').textContent=e.message||String(e);$('catalogError').classList.remove('hidden')}
+};
+
+$('applyDiscount').onclick=()=>{
+  $('catalogError').classList.add('hidden');$('catalogOk').classList.add('hidden');
+  try{
+    const pct=Number(String($('catalogDiscount').value).replace(',','.'));
+    if(!Number.isFinite(pct) || pct<=0 || pct>=100) throw new Error('Ingresá un descuento mayor a 0 y menor a 100%.');
+    if(!confirm('¿DISMINUIR '+pct+'% el precio efectivo de TODO el catálogo vigente?')) return;
+    const cat=PiocaCatalog.applyDiscount(pct);
+    $('catalogDiscount').value='0';$('catalogPreview').classList.add('hidden');
+    $('catalogOk').textContent='Descuento aplicado y registrado con fecha. Catálogo versión '+cat.version+'.';$('catalogOk').classList.remove('hidden');renderCatalog();
   }catch(e){$('catalogError').textContent=e.message||String(e);$('catalogError').classList.remove('hidden')}
 };
 
