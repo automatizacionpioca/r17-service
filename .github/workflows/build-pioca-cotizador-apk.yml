@@ -1099,8 +1099,7 @@ jobs:
                                       .setPackage(getPackageName())
                       );
                       stopSelf();
-                  }
-                  }
+                  }}}
 
               private void saveAutoFinish(Location location, double rawDistance) {
                   long endAt = System.currentTimeMillis();
