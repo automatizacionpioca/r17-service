@@ -297,9 +297,11 @@
 
         <div class="invoiceBox">
           <div class="previewLine" id="previewTransferRow">
-            <span id="previewTransferLabel">Precio por transferencia + IVA</span>
+            <span id="previewTransferLabel">Facturado sin IVA</span>
             <b class="invoiceBase" id="previewPlusIva">—</b>
           </div>
+
+          <div id="previewIvaBreakdown"></div>
 
           <div class="previewLine" id="previewIvaIncludedRow">
             <span id="previewIvaIncludedLabel">Precio final IVA incluido</span>
@@ -350,9 +352,9 @@
   </div>
 </div>
 
-<script src="r17-catalog.js?v=20261008-1"></script>
+<script src="r17-catalog.js?v=20261008-3"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js"></script>
-<script src="r17-pdf.js?v=20261008-1"></script>
+<script src="r17-pdf.js?v=20261008-3"></script>
 <script>
 const SERVICE_KEY='r17_active_v1';
 const AUTO_CHECK_MS=120000;
@@ -714,15 +716,34 @@ function askCustomerType(){
 
 function itemCommercialText(item,customerType){
   const cfg=readConfig();
-  const p=PiocaCatalog.commercialPrices(num(item.price),cfg);
+  const iva=PiocaCatalog.productIvaPercent(item,10.5);
+  const p=PiocaCatalog.commercialPrices(num(item.price),cfg,iva);
   const qty=Math.max(1,num(item.qty));
   const cash=p.cash*qty;
   const base=p.invoiceBase*qty;
+  const tax=p.ivaAmount*qty;
   const total=p.invoiceTotal*qty;
   const type=normalizeCustomerType(customerType);
-  if(type==='consorcio') return money(total)+' IVA incluido';
-  if(type==='industria') return money(base)+' + IVA';
-  return 'Efectivo '+money(cash)+' · Facturado '+money(base)+' + IVA';
+  if(type==='consorcio') return money(total)+' IVA '+formatPercent(iva)+' incluido';
+  if(type==='industria') return money(base)+' + IVA '+formatPercent(iva);
+  return 'Efectivo '+money(cash)+' · Facturado '+money(base)+' + IVA '+formatPercent(iva)+' ('+money(tax)+')';
+}
+
+function formatPercent(value){
+  return new Intl.NumberFormat('es-AR',{maximumFractionDigits:2}).format(num(value))+'%';
+}
+
+function aggregateIvaBreakdown(rows){
+  const map=new Map();
+  rows.forEach(row=>{
+    const pct=Math.max(0,num(row.percent));
+    const key=String(pct);
+    const current=map.get(key)||{percent:pct,base:0,amount:0};
+    current.base+=num(row.base);
+    current.amount+=num(row.amount);
+    map.set(key,current);
+  });
+  return [...map.values()].filter(x=>x.base>0 || x.amount>0).sort((a,b)=>b.percent-a.percent);
 }
 
 function calculateAmounts(){
@@ -762,30 +783,76 @@ function calculateAmounts(){
   const travelCost=(travelMinutes/60)*effectiveTravelRate;
   const laborCost=(laborMinutes/60)*effectiveLaborRate;
   const tollCost=tollCount*num(cfg.toll);
-  const partsCost=items.reduce((sum,item)=>sum+(num(item.qty)*num(item.price)),0);
+
+  const itemsWithTax=items.map(item=>({
+    ...item,
+    iva_percent:PiocaCatalog.productIvaPercent(item,10.5)
+  }));
+  const partsCost=itemsWithTax.reduce((sum,item)=>sum+(num(item.qty)*num(item.price)),0);
 
   const visitLaborRaw=kmCost+travelCost+laborCost+tollCost;
   const visitLaborRounded=round500(visitLaborRaw);
   const totalCashRaw=visitLaborRaw+partsCost;
   const cashRounded=visitLaborRounded+partsCost;
 
-  const ivaPercent=PiocaCatalog.ivaPercent(cfg);
+  const serviceIvaPercent=PiocaCatalog.ivaPercent(cfg);
   const transferSurchargePercent=PiocaCatalog.invoicePercent(cfg);
-  const transferSurchargeAmount=cashRounded*(transferSurchargePercent/100);
-  const transferBase=cashRounded+transferSurchargeAmount;
-  const ivaAmount=transferBase*(ivaPercent/100);
+  const transferFactor=1+(transferSurchargePercent/100);
+
+  // Servicios (km, traslado, mano de obra y peajes) tributan con la alícuota de servicio.
+  const serviceTransferBase=visitLaborRounded*transferFactor;
+  const serviceIvaAmount=serviceTransferBase*(serviceIvaPercent/100);
+
+  // Cada producto conserva su propia alícuota de IVA del catálogo.
+  let partsTransferBase=0;
+  let partsIvaAmount=0;
+  const ivaRows=[{percent:serviceIvaPercent,base:serviceTransferBase,amount:serviceIvaAmount}];
+  const itemsCalculated=itemsWithTax.map(item=>{
+    const qty=Math.max(1,num(item.qty));
+    const cashTotal=qty*num(item.price);
+    const invoiceBase=cashTotal*transferFactor;
+    const ivaPercent=PiocaCatalog.productIvaPercent(item,10.5);
+    const ivaAmount=invoiceBase*(ivaPercent/100);
+    const invoiceTotal=invoiceBase+ivaAmount;
+    partsTransferBase+=invoiceBase;
+    partsIvaAmount+=ivaAmount;
+    ivaRows.push({percent:ivaPercent,base:invoiceBase,amount:ivaAmount});
+    return {...item,iva_percent:ivaPercent,invoice_base:invoiceBase,iva_amount:ivaAmount,invoice_total:invoiceTotal};
+  });
+
+  const transferBase=serviceTransferBase+partsTransferBase;
+  const transferSurchargeAmount=transferBase-cashRounded;
+  const ivaAmount=serviceIvaAmount+partsIvaAmount;
   const ivaIncluded=transferBase+ivaAmount;
+  const ivaBreakdown=aggregateIvaBreakdown(ivaRows);
 
   return {
     routeKm,travelMinutes,includeReturnTravelTime,laborMinutes,
     customerType,customerTypeLabel:customerTypeLabel(customerType),
     customerSurchargePercent,customerRateFactor,
     baseTravelRate,baseLaborRate,effectiveTravelRate,effectiveLaborRate,
-    tollCount,items,kmCost,travelCost,laborCost,tollCost,partsCost,
+    tollCount,items:itemsCalculated,kmCost,travelCost,laborCost,tollCost,partsCost,
     visitLaborRaw,visitLaborRounded,totalCashRaw,cashRounded,
     transferSurchargePercent,transferSurchargeAmount,transferBase,
-    ivaPercent,ivaAmount,ivaIncluded
+    serviceIvaPercent,serviceTransferBase,serviceIvaAmount,
+    partsTransferBase,partsIvaAmount,ivaBreakdown,
+    ivaPercent:serviceIvaPercent,ivaAmount,ivaIncluded
   };
+}
+
+function renderIvaBreakdown(calc){
+  const box=$('previewIvaBreakdown');
+  box.innerHTML='';
+  (calc.ivaBreakdown||[]).forEach(row=>{
+    const line=document.createElement('div');
+    line.className='previewLine';
+    const left=document.createElement('span');
+    left.textContent='IVA '+formatPercent(row.percent);
+    const right=document.createElement('b');
+    right.className='invoiceBase';
+    right.textContent=money(row.amount);
+    line.appendChild(left);line.appendChild(right);box.appendChild(line);
+  });
 }
 
 function renderCommercialPreview(calc){
@@ -794,8 +861,9 @@ function renderCommercialPreview(calc){
   $('previewCustomerType').textContent=calc.customerTypeLabel;
   $('previewTime').textContent=minutesText(calc.laborMinutes + calc.travelMinutes);
   $('previewCash').textContent=money(calc.cashRounded);
-  $('previewPlusIva').textContent=money(calc.transferBase)+' + IVA';
+  $('previewPlusIva').textContent=money(calc.transferBase);
   $('previewIvaIncluded').textContent=money(calc.ivaIncluded);
+  renderIvaBreakdown(calc);
 
   const cashRow=$('previewCashRow');
   const transferRow=$('previewTransferRow');
@@ -806,15 +874,14 @@ function renderCommercialPreview(calc){
 
   if(calc.customerType==='consorcio'){
     cashRow.classList.add('hidden');
-    transferRow.classList.add('hidden');
+    $('previewTransferLabel').textContent='Subtotal facturado sin IVA';
     $('previewIvaIncludedLabel').textContent='Total final IVA incluido';
   }else if(calc.customerType==='industria'){
     cashRow.classList.add('hidden');
-    $('previewTransferLabel').textContent='Subtotal facturado';
-    $('previewPlusIva').textContent=money(calc.transferBase)+' + IVA';
+    $('previewTransferLabel').textContent='Subtotal facturado sin IVA';
     $('previewIvaIncludedLabel').textContent='Total con IVA';
   }else{
-    $('previewTransferLabel').textContent='Precio por transferencia + IVA';
+    $('previewTransferLabel').textContent='Facturado sin IVA';
     $('previewIvaIncludedLabel').textContent='Precio final IVA incluido';
   }
 
@@ -1446,6 +1513,10 @@ function catalogOptionsHtml(){
     .join('');
 }
 
+function optionHtml(value,label){
+  return '<option value="'+String(value).replaceAll('&','&amp;').replaceAll('"','&quot;')+'">'+String(label).replaceAll('&','&amp;').replaceAll('<','&lt;')+'</option>';
+}
+
 function addItem(values={}){
   itemSeq++;
   const wrap=document.createElement('div');
@@ -1466,8 +1537,12 @@ function addItem(values={}){
         <select class="itemCategory">${catalogOptionsHtml()}</select>
       </div>
       <div>
-        <label>Producto</label>
-        <select class="itemProduct" disabled><option value="">Seleccionar producto</option></select>
+        <label>Fabricante / proveedor</label>
+        <select class="itemSupplier" disabled><option value="">Seleccionar fabricante</option></select>
+      </div>
+      <div>
+        <label>Producto / modelo</label>
+        <select class="itemProduct" disabled><option value="">Seleccionar modelo</option></select>
       </div>
     </div>
     <div class="catalogPriceHint hidden"></div>
@@ -1478,34 +1553,40 @@ function addItem(values={}){
       <input class="itemDesc" placeholder="Ej.: Control remoto" value="${values.desc||''}">
       <label>Precio efectivo unitario</label>
       <input class="itemPrice" type="number" min="0" step="0.01" inputmode="decimal" placeholder="$" value="${values.price||''}">
+      <label>IVA del producto (%)</label>
+      <input class="itemIva" type="number" min="0" step="0.01" inputmode="decimal" value="${values.iva_percent??10.5}">
     </div>
   `;
 
   const category=wrap.querySelector('.itemCategory');
+  const supplier=wrap.querySelector('.itemSupplier');
   const product=wrap.querySelector('.itemProduct');
   const desc=wrap.querySelector('.itemDesc');
   const price=wrap.querySelector('.itemPrice');
+  const iva=wrap.querySelector('.itemIva');
   const hint=wrap.querySelector('.catalogPriceHint');
 
   function setManual(manual){
     wrap.dataset.source=manual?'manual':'catalog';
-    desc.readOnly=!manual;price.readOnly=!manual;
+    desc.readOnly=!manual;price.readOnly=!manual;iva.readOnly=!manual;
     if(manual){
+      supplier.disabled=true;supplier.innerHTML='<option value="">Ítem personalizado</option>';
       product.disabled=true;product.innerHTML='<option value="">Ítem personalizado</option>';
       hint.classList.add('hidden');
-      wrap.dataset.catalogCode='';wrap.dataset.catalogCategory='';wrap.dataset.catalogProduct='';
+      wrap.dataset.catalogCode='';wrap.dataset.catalogCategory='';wrap.dataset.catalogSupplier='';wrap.dataset.catalogProduct='';
     }
   }
 
   function showCatalogPrice(item){
-    const cp=PiocaCatalog.commercialPrices(item.cashPrice,readConfig());
+    const itemIva=PiocaCatalog.productIvaPercent(item,10.5);
+    const cp=PiocaCatalog.commercialPrices(item.cashPrice,readConfig(),itemIva);
     const type=normalizeCustomerType(currentContext&&currentContext.customerType);
     if(type==='consorcio'){
-      hint.innerHTML='<b>'+money(cp.invoiceTotal)+'</b> IVA incluido';
+      hint.innerHTML='<b>'+money(cp.invoiceTotal)+'</b> · IVA '+formatPercent(itemIva)+' incluido';
     }else if(type==='industria'){
-      hint.innerHTML='<b>'+money(cp.invoiceBase)+'</b> + IVA';
+      hint.innerHTML='<b>'+money(cp.invoiceBase)+'</b> + IVA '+formatPercent(itemIva)+' ('+money(cp.ivaAmount)+')';
     }else{
-      hint.innerHTML='Efectivo <b>'+money(cp.cash)+'</b> · Facturado <b>'+money(cp.invoiceBase)+'</b> + IVA';
+      hint.innerHTML='Efectivo <b>'+money(cp.cash)+'</b> · Facturado <b>'+money(cp.invoiceBase)+'</b> + IVA '+formatPercent(itemIva)+' · Final <b>'+money(cp.invoiceTotal)+'</b>';
     }
     hint.classList.remove('hidden');
   }
@@ -1513,15 +1594,25 @@ function addItem(values={}){
   category.onchange=()=>{
     const value=category.value;
     if(value==='__manual'){
-      setManual(true);desc.value='';price.value='';return;
+      setManual(true);desc.value='';price.value='';iva.value='10.5';return;
     }
     wrap.dataset.catalogCategory=value;
-    const products=PiocaCatalog.products(value);
+    wrap.dataset.catalogSupplier='';wrap.dataset.catalogProduct='';wrap.dataset.catalogCode='';
+    const suppliers=PiocaCatalog.suppliers(value);
+    supplier.disabled=false;
+    supplier.innerHTML='<option value="">Seleccionar fabricante</option>'+suppliers.map(x=>optionHtml(x,x)).join('');
+    product.disabled=true;product.innerHTML='<option value="">Seleccionar modelo</option>';
+    hint.classList.add('hidden');desc.value='';price.value='';iva.value='10.5';
+  };
+
+  supplier.onchange=()=>{
+    const value=supplier.value;
+    wrap.dataset.catalogSupplier=value;
+    wrap.dataset.catalogProduct='';wrap.dataset.catalogCode='';
+    const products=PiocaCatalog.products(category.value,value);
     product.disabled=false;
-    product.innerHTML='<option value="">Seleccionar producto</option>'+products.map(p=>
-      '<option value="'+String(p.code).replaceAll('&','&amp;').replaceAll('"','&quot;')+'">'+p.product+'</option>'
-    ).join('');
-    hint.classList.add('hidden');desc.value='';price.value='';
+    product.innerHTML='<option value="">Seleccionar modelo</option>'+products.map(p=>optionHtml(p.code,p.product)).join('');
+    hint.classList.add('hidden');desc.value='';price.value='';iva.value='10.5';
   };
 
   product.onchange=()=>{
@@ -1530,10 +1621,12 @@ function addItem(values={}){
     wrap.dataset.source='catalog';
     wrap.dataset.catalogCode=item.code;
     wrap.dataset.catalogCategory=item.category;
+    wrap.dataset.catalogSupplier=item.supplier||'';
     wrap.dataset.catalogProduct=item.product;
     desc.value=item.description||item.product;
     price.value=String(item.cashPrice);
-    desc.readOnly=true;price.readOnly=true;
+    iva.value=String(PiocaCatalog.productIvaPercent(item,10.5));
+    desc.readOnly=true;price.readOnly=true;iva.readOnly=true;
     showCatalogPrice(item);
   };
 
@@ -1564,9 +1657,11 @@ function getItems(){
     qty:Number(el.querySelector('.itemQty').value||0),
     desc:el.querySelector('.itemDesc').value.trim(),
     price:Number(el.querySelector('.itemPrice').value||0),
+    iva_percent:Number(el.querySelector('.itemIva').value||0),
     source:el.dataset.source||'manual',
     catalog_code:el.dataset.catalogCode||null,
     catalog_category:el.dataset.catalogCategory||null,
+    catalog_supplier:el.dataset.catalogSupplier||null,
     catalog_product:el.dataset.catalogProduct||null
   })).filter(x=>x.qty>0 && (x.desc || x.price>0));
 }
@@ -1637,7 +1732,7 @@ function issuedPayload(calc){
     rate_travel_hour:calc.effectiveTravelRate,
     rate_labor_hour:calc.effectiveLaborRate,
     rate_toll:num(cfg.toll),
-    iva_percent:calc.ivaPercent,
+    iva_percent:calc.serviceIvaPercent,
 
     cost_km:calc.kmCost,
     cost_travel:calc.travelCost,
@@ -1650,8 +1745,9 @@ function issuedPayload(calc){
     total_cash_rounded:calc.cashRounded,
     iva_amount:calc.ivaAmount,
     total_invoice:calc.ivaIncluded,
+    transfer_base:calc.transferBase,
 
-    pdf_version:'r17-pdf-v3-large-green',
+    pdf_version:'r17-pdf-v6-catalogo-iva-mixto-sin-distancia',
     pdf_name:'piOca_Resumen_Servicio.pdf',
 
     snapshot:{
@@ -1674,6 +1770,7 @@ function issuedPayload(calc){
       customer_type_label:calc.customerTypeLabel,
       customer_surcharge_percent:calc.customerSurchargePercent,
       catalog_version:PiocaCatalog.load().version,
+      tax_model:'mixed_v2',
       toll_count:calc.tollCount,
       items:calc.items,
       prices:{
@@ -1687,7 +1784,13 @@ function issuedPayload(calc){
         transfer_surcharge_percent:calc.transferSurchargePercent,
         transfer_surcharge_amount:calc.transferSurchargeAmount,
         transfer_base:calc.transferBase,
-        iva_percent:calc.ivaPercent,
+        service_iva_percent:calc.serviceIvaPercent,
+        service_transfer_base:calc.serviceTransferBase,
+        service_iva_amount:calc.serviceIvaAmount,
+        parts_transfer_base:calc.partsTransferBase,
+        parts_iva_amount:calc.partsIvaAmount,
+        iva_breakdown:calc.ivaBreakdown,
+        iva_percent:calc.serviceIvaPercent,
         iva_amount:calc.ivaAmount,
         total_invoice:calc.ivaIncluded
       },
