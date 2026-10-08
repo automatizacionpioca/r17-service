@@ -6,427 +6,49 @@
 <title>Historial</title>
 <link rel="stylesheet" href="styles.css">
 <style>
-.historyToolbar{
-  display:flex;
-  gap:10px;
-  align-items:center;
-  justify-content:space-between;
-  margin-bottom:14px;
-}
-.historyToolbar p{margin:0}
-.refreshBtn{
-  border:1px solid #d7e0ea;
-  background:#fff;
-  color:#1f3348;
-  border-radius:12px;
-  padding:10px 14px;
-  font-weight:700;
-  cursor:pointer;
-}
-.historyList{
-  display:grid;
-  gap:14px;
-}
-.opCard{
-  border:1px solid #dbe3ec;
-  border-radius:18px;
-  background:#fff;
-  overflow:hidden;
-  box-shadow:0 8px 22px rgba(20,55,90,.05);
-}
-.opHead{
-  padding:16px;
-  background:#f7f9fc;
-  border-bottom:1px solid #e5eaf0;
-}
-.opDate{
-  font-size:12px;
-  color:#7a8797;
-  margin-bottom:5px;
-}
-.opAddress{
-  font-size:18px;
-  line-height:1.25;
-  font-weight:800;
-  color:#243448;
-}
-.opType{
-  display:inline-block;
-  margin-top:8px;
-  padding:5px 9px;
-  border-radius:999px;
-  font-size:11px;
-  font-weight:800;
-  color:#1d5aa6;
-  background:#eaf3ff;
-}
-.opBody{
-  padding:14px 16px 16px;
-}
-.opRow{
-  display:flex;
-  justify-content:space-between;
-  gap:14px;
-  padding:8px 0;
-  border-bottom:1px solid #edf1f5;
-}
-.opRow:last-child{border-bottom:0}
-.opRow span{color:#718093}
-.opRow b{
-  color:#26384c;
-  text-align:right;
-}
-.opTotal b{
-  color:#0d5db0;
-  font-size:18px;
-}
-.pdfActions{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:9px;
-  margin-top:10px;
-}
-.pdfBtn{
-  border:1px solid #cfd9e5;
-  background:#fff;
-  color:#243448;
-  border-radius:12px;
-  padding:11px 10px;
-  font-weight:800;
-  cursor:pointer;
-}
-.pdfBtn.share{
-  background:#1769b5;
-  color:#fff;
-  border-color:#1769b5;
-}
-.detailBtn{
-  width:100%;
-  margin-top:12px;
-  border:1px solid #cfd9e5;
-  background:#fff;
-  color:#243448;
-  border-radius:12px;
-  padding:11px 14px;
-  font-weight:800;
-  cursor:pointer;
-}
-.internal{
-  margin-top:12px;
-  padding:12px;
-  border-radius:12px;
-  background:#f6f8fb;
-  border:1px solid #e0e6ed;
-}
-.internalTitle{
-  font-weight:800;
-  color:#47586b;
-  margin-bottom:6px;
-}
-.internal .opRow{
-  font-size:13px;
-}
-.errorBox{
-  background:#fff1f1;
-  color:#a42b2b;
-  border:1px solid #f0caca;
-  border-radius:14px;
-  padding:14px;
-}
-.loadingBox,
-.emptyBox{
-  background:#f7f9fc;
-  color:#68788b;
-  border:1px solid #dfe6ee;
-  border-radius:14px;
-  padding:18px;
-  text-align:center;
-}
+.historyToolbar{display:flex;gap:10px;align-items:center;justify-content:space-between;margin-bottom:14px}.historyToolbar p{margin:0}
+.refreshBtn{border:1px solid #d7e0ea;background:#fff;color:#1f3348;border-radius:12px;padding:10px 14px;font-weight:700;cursor:pointer}
+.historyList{display:grid;gap:14px}.opCard{border:1px solid #dbe3ec;border-radius:18px;background:#fff;overflow:hidden;box-shadow:0 8px 22px rgba(20,55,90,.05)}
+.opHead{padding:16px;background:#f7f9fc;border-bottom:1px solid #e5eaf0}.opDate{font-size:12px;color:#7a8797;margin-bottom:5px}.opAddress{font-size:18px;line-height:1.25;font-weight:800;color:#243448}
+.opType,.opUpdate{display:inline-block;margin-top:8px;margin-right:6px;padding:5px 9px;border-radius:999px;font-size:11px;font-weight:800;color:#1d5aa6;background:#eaf3ff}.opUpdate{color:#26703b;background:#e9f7ed}
+.opBody{padding:14px 16px 16px}.opRow{display:flex;justify-content:space-between;gap:14px;padding:8px 0;border-bottom:1px solid #edf1f5}.opRow:last-child{border-bottom:0}.opRow span{color:#718093}.opRow b{color:#26384c;text-align:right}.opTotal b{color:#0d5db0;font-size:18px}
+.pdfActions{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:10px}.pdfBtn,.detailBtn,.updateBtn{border:1px solid #cfd9e5;background:#fff;color:#243448;border-radius:12px;padding:11px 10px;font-weight:800;cursor:pointer}.pdfBtn.share{background:#1769b5;color:#fff;border-color:#1769b5}.detailBtn,.updateBtn{width:100%;margin-top:12px}.updateBtn{background:#eef8f0;border-color:#bcdcc4;color:#25683a}
+.internal{margin-top:12px;padding:12px;border-radius:12px;background:#f6f8fb;border:1px solid #e0e6ed}.internalTitle{font-weight:800;color:#47586b;margin-bottom:6px}.internal .opRow{font-size:13px}
+.errorBox{background:#fff1f1;color:#a42b2b;border:1px solid #f0caca;border-radius:14px;padding:14px}.loadingBox,.emptyBox{background:#f7f9fc;color:#68788b;border:1px solid #dfe6ee;border-radius:14px;padding:18px;text-align:center}
 </style>
 </head>
 <body>
 <main class="shell">
-  <header class="head">
-    <div class="brandMark" style="background:transparent;box-shadow:none;border-radius:0;">
-      <img src="https://automatizacionpioca.github.io/pioca-gps/logo-pioca.png"
-           alt="piOca®"
-           style="width:100%;height:auto;display:block;">
-    </div>
-    <div>
-      <h1>Historial</h1>
-      <p>Operaciones emitidas y detalle interno.</p>
-    </div>
-  </header>
-
-  <nav class="nav">
-    <a href="index.html">Nuevo</a>
-    <a class="activo" href="log.html">Historial</a>
-    <a href="cfg.html">Configuración</a>
-  </nav>
-
-  <section class="body">
-    <div class="card">
-      <div class="historyToolbar">
-        <div>
-          <h2 style="margin-bottom:4px">Operaciones emitidas</h2>
-          <p>Las más recientes aparecen primero.</p>
-        </div>
-        <button id="refreshBtn" class="refreshBtn" type="button">Actualizar</button>
-      </div>
-
-      <div id="historyList" class="historyList">
-        <div class="loadingBox">Cargando historial…</div>
-      </div>
-    </div>
-  </section>
-
-  <div class="footerNote">piOca® · uso interno</div>
-</main>
-
+<header class="head"><div class="brandMark" style="background:transparent;box-shadow:none;border-radius:0"><img src="https://automatizacionpioca.github.io/pioca-gps/logo-pioca.png" alt="piOca®" style="width:100%;height:auto;display:block"></div><div><h1>Historial</h1><p>Operaciones emitidas y detalle interno.</p></div></header>
+<nav class="nav"><a href="index.html">Nuevo</a><a class="activo" href="log.html">Historial</a><a href="cfg.html">Configuración</a></nav>
+<section class="body"><div class="card"><div class="historyToolbar"><div><h2 style="margin-bottom:4px">Operaciones emitidas</h2><p>Las más recientes aparecen primero.</p></div><button id="refreshBtn" class="refreshBtn" type="button">Actualizar</button></div><div id="historyList" class="historyList"><div class="loadingBox">Cargando historial…</div></div></div></section>
+<div class="footerNote">piOca® · uso interno</div></main>
+<script src="r17-catalog.js?v=20261008-1"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js"></script>
-<script src="r17-pdf.js?v=20260929-5"></script>
+<script src="r17-pdf.js?v=20261008-1"></script>
 <script>
 const HISTORY_URL='https://apxrmkdegjnblkbyjsbp.supabase.co/functions/v1/r17-history';
+const ISSUE_URL='https://apxrmkdegjnblkbyjsbp.supabase.co/functions/v1/r17-issue';
 const SUPABASE_PUBLISHABLE='sb_publishable_htgEX8HiRGAjpCVhPw1gfg_tOPxkJoI';
+const CFG_KEY='r17_cfg_v1';
 const historyById=new Map();
-
-function money(v){
-  return new Intl.NumberFormat('es-AR',{
-    style:'currency',
-    currency:'ARS',
-    maximumFractionDigits:0
-  }).format(Number(v)||0);
-}
-
-function minutesText(value){
-  const min=Math.max(0,Math.round(Number(value)||0));
-  const h=Math.floor(min/60);
-  const m=min%60;
-  if(h && m) return h+' h '+m+' min';
-  if(h) return h+' h';
-  return m+' min';
-}
-
-function dateText(iso){
-  if(!iso) return '—';
-  const d=new Date(iso);
-  return new Intl.DateTimeFormat('es-AR',{
-    day:'2-digit',
-    month:'2-digit',
-    year:'numeric',
-    hour:'2-digit',
-    minute:'2-digit'
-  }).format(d);
-}
-
-function escapeHtml(value){
-  return String(value??'')
-    .replaceAll('&','&amp;')
-    .replaceAll('<','&lt;')
-    .replaceAll('>','&gt;')
-    .replaceAll('"','&quot;')
-    .replaceAll("'","&#039;");
-}
-
-async function fetchHistory(){
-  const response=await fetch(HISTORY_URL,{
-    method:'GET',
-    headers:{
-      'apikey':SUPABASE_PUBLISHABLE,
-      'Authorization':'Bearer '+SUPABASE_PUBLISHABLE
-    }
-  });
-
-  let data=null;
-  try{
-    data=await response.json();
-  }catch(e){
-    throw new Error('La función de Historial respondió con un formato inválido.');
-  }
-
-  if(!response.ok || !data.ok){
-    const detail=data && data.detail ? ' · '+data.detail : '';
-    throw new Error((data && data.error ? data.error : 'No se pudo cargar el historial')+detail);
-  }
-
-  return Array.isArray(data.items) ? data.items : [];
-}
-
-function totalEmployed(item){
-  const snap=item.snapshot || {};
-  if(snap.total_employed_minutes!==undefined){
-    return Number(snap.total_employed_minutes)||0;
-  }
-  return (Number(item.round_trip_minutes)||0)+(Number(item.labor_minutes)||0);
-}
-
-function itemsSummary(item){
-  const items=Array.isArray(item.items) ? item.items : [];
-  if(!items.length) return 'Sin accesorios / repuestos';
-  return items.map(x=>{
-    const qty=Number(x.qty)||0;
-    const desc=x.desc || 'Ítem';
-    return qty+' × '+desc;
-  }).join(' · ');
-}
-
-function internalDetail(item){
-  const snap=item.snapshot || {};
-  const rates=snap.rates || {};
-  const prices=snap.prices || {};
-
-  return `
-    <div class="internal hidden" id="internal-${escapeHtml(item.id)}">
-      <div class="internalTitle">Detalle interno</div>
-      <div class="opRow"><span>Distancia ida</span><b>${(Number(item.one_way_km)||0).toFixed(1)} km</b></div>
-      <div class="opRow"><span>Distancia ida y vuelta</span><b>${(Number(item.round_trip_km)||0).toFixed(1)} km</b></div>
-      <div class="opRow"><span>Traslado ida y vuelta</span><b>${minutesText(item.round_trip_minutes)}</b></div>
-      <div class="opRow"><span>Trabajo</span><b>${minutesText(item.labor_minutes)}</b></div>
-      <div class="opRow"><span>Peajes</span><b>${Number(item.toll_count)||0}</b></div>
-      <div class="opRow"><span>Valor/km usado</span><b>${money(rates.km)}</b></div>
-      <div class="opRow"><span>Hora traslado usada</span><b>${money(rates.travel_hour)}</b></div>
-      <div class="opRow"><span>Hora mano de obra usada</span><b>${money(rates.labor_hour)}</b></div>
-      <div class="opRow"><span>Valor peaje usado</span><b>${money(rates.toll)}</b></div>
-      <div class="opRow"><span>Total previo a redondeo</span><b>${money(prices.total_cash_raw)}</b></div>
-    </div>
-  `;
-}
-
-function cardHtml(item){
-  const type=item.mode==='service' ? 'Servicio en domicilio' : 'Cotización anticipada';
-  const address=item.customer_address || 'Sin ubicación';
-  const employed=totalEmployed(item);
-  const cash=Number(item.total_cash_rounded)||0;
-  const invoice=Number(item.total_invoice)||0;
-
-  return `
-    <article class="opCard">
-      <div class="opHead">
-        <div class="opDate">${dateText(item.created_at)}</div>
-        <div class="opAddress">${escapeHtml(address)}</div>
-        <div class="opType">${type}</div>
-      </div>
-
-      <div class="opBody">
-        <div class="opRow">
-          <span>Distancia informada</span>
-          <b>${(Number(item.one_way_km)||0).toFixed(1)} km</b>
-        </div>
-
-        <div class="opRow">
-          <span>Tiempo empleado</span>
-          <b>${minutesText(employed)}</b>
-        </div>
-
-        <div class="opRow">
-          <span>Accesorios / repuestos</span>
-          <b>${escapeHtml(itemsSummary(item))}</b>
-        </div>
-
-        <div class="opRow opTotal">
-          <span>Precio efectivo</span>
-          <b>${money(cash)}</b>
-        </div>
-
-        <div class="opRow opTotal">
-          <span>Final IVA incluido</span>
-          <b>${money(invoice)}</b>
-        </div>
-
-        <div class="pdfActions">
-          <button class="pdfBtn" type="button"
-            onclick="openHistoryPdf('${escapeHtml(item.id)}')">
-            Ver PDF
-          </button>
-          <button class="pdfBtn share" type="button"
-            onclick="shareHistoryPdf('${escapeHtml(item.id)}')">
-            Compartir PDF
-          </button>
-          <button class="pdfBtn" style="grid-column:1/-1" type="button"
-            onclick="copyHistoryMessage(this)">
-            Copiar mensaje
-          </button>
-        </div>
-
-        <button class="detailBtn" type="button"
-          onclick="toggleInternal('${escapeHtml(item.id)}',this)">
-          Ver detalle interno
-        </button>
-
-        ${internalDetail(item)}
-      </div>
-    </article>
-  `;
-}
-
-
-async function openHistoryPdf(id){
-  const item=historyById.get(id);
-  if(!item) return;
-  try{
-    await PiocaPDF.openPdf(item);
-  }catch(e){
-    alert('No se pudo abrir el PDF: '+(e.message||String(e)));
-  }
-}
-
-async function shareHistoryPdf(id){
-  const item=historyById.get(id);
-  if(!item) return;
-  try{
-    const result=await PiocaPDF.sharePdf(item);
-    if(result && result.messageCopied){
-      alert('PDF compartido. El mensaje quedó copiado por si WhatsApp no lo agrega automáticamente.');
-    }
-  }catch(e){
-    if(e && e.name==='AbortError') return;
-    alert('No se pudo compartir el PDF: '+(e.message||String(e)));
-  }
-}
-
-async function copyHistoryMessage(btn){
-  const original=btn.textContent;
-  try{
-    const ok=await PiocaPDF.copyMessage();
-    btn.textContent=ok?'Mensaje copiado':'No se pudo copiar';
-  }catch(e){
-    btn.textContent='No se pudo copiar';
-  }
-  setTimeout(()=>btn.textContent=original,1800);
-}
-
-function toggleInternal(id,btn){
-  const box=document.getElementById('internal-'+id);
-  if(!box) return;
-  const hidden=box.classList.toggle('hidden');
-  btn.textContent=hidden ? 'Ver detalle interno' : 'Ocultar detalle interno';
-}
-
-async function loadHistory(){
-  const list=document.getElementById('historyList');
-  list.innerHTML='<div class="loadingBox">Cargando historial…</div>';
-  document.getElementById('refreshBtn').disabled=true;
-
-  try{
-    const items=await fetchHistory();
-
-    if(!items.length){
-      list.innerHTML='<div class="emptyBox">Todavía no hay operaciones emitidas.</div>';
-      return;
-    }
-
-    historyById.clear();
-    items.forEach(item=>historyById.set(String(item.id),item));
-    list.innerHTML=items.map(cardHtml).join('');
-  }catch(e){
-    list.innerHTML='<div class="errorBox">'+escapeHtml(e.message||String(e))+'</div>';
-  }finally{
-    document.getElementById('refreshBtn').disabled=false;
-  }
-}
-
-document.getElementById('refreshBtn').onclick=loadHistory;
-loadHistory();
-</script>
-</body>
-</html>
+function money(v){return new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0}).format(Number(v)||0)}
+function minutesText(value){const min=Math.max(0,Math.round(Number(value)||0));const h=Math.floor(min/60),m=min%60;if(h&&m)return h+' h '+m+' min';if(h)return h+' h';return m+' min'}
+function dateText(iso){if(!iso)return '—';const d=new Date(iso);return new Intl.DateTimeFormat('es-AR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}).format(d)}
+function escapeHtml(value){return String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;')}
+function readConfig(){try{return JSON.parse(localStorage.getItem(CFG_KEY)||'{}')}catch(e){return {}}}
+async function fetchHistory(){const response=await fetch(HISTORY_URL,{method:'GET',headers:{apikey:SUPABASE_PUBLISHABLE,Authorization:'Bearer '+SUPABASE_PUBLISHABLE}});let data=null;try{data=await response.json()}catch(e){throw new Error('La función de Historial respondió con un formato inválido.')}if(!response.ok||!data.ok){const detail=data&&data.detail?' · '+data.detail:'';throw new Error((data&&data.error?data.error:'No se pudo cargar el historial')+detail)}return Array.isArray(data.items)?data.items:[]}
+function totalEmployed(item){const snap=item.snapshot||{};if(snap.total_employed_minutes!==undefined)return Number(snap.total_employed_minutes)||0;return (Number(item.round_trip_minutes)||0)+(Number(item.labor_minutes)||0)}
+function itemsSummary(item){const items=Array.isArray(item.items)?item.items:[];if(!items.length)return 'Sin accesorios / repuestos';return items.map(x=>(Number(x.qty)||0)+' × '+(x.desc||'Ítem')).join(' · ')}
+function internalDetail(item){const snap=item.snapshot||{},rates=snap.rates||{},prices=snap.prices||{};return `<div class="internal hidden" id="internal-${escapeHtml(item.id)}"><div class="internalTitle">Detalle interno</div><div class="opRow"><span>Distancia ida</span><b>${(Number(item.one_way_km)||0).toFixed(1)} km</b></div><div class="opRow"><span>Distancia ida y vuelta</span><b>${(Number(item.round_trip_km)||0).toFixed(1)} km</b></div><div class="opRow"><span>Traslado</span><b>${minutesText(snap.billed_travel_minutes!==undefined?snap.billed_travel_minutes:item.round_trip_minutes)}</b></div><div class="opRow"><span>Trabajo</span><b>${minutesText(item.labor_minutes)}</b></div><div class="opRow"><span>Peajes</span><b>${Number(item.toll_count)||0}</b></div><div class="opRow"><span>Valor/km usado</span><b>${money(rates.km)}</b></div><div class="opRow"><span>Hora traslado usada</span><b>${money(rates.travel_hour)}</b></div><div class="opRow"><span>Hora mano de obra usada</span><b>${money(rates.labor_hour)}</b></div><div class="opRow"><span>Diferencial facturado</span><b>${Number(prices.transfer_surcharge_percent??12)}%</b></div><div class="opRow"><span>Catálogo</span><b>V${snap.catalog_version??'—'}</b></div></div>`}
+function cardHtml(item){const snap=item.snapshot||{};const type=item.mode==='service'?'Servicio en domicilio':'Cotización anticipada';const address=item.customer_address||'Sin ubicación';const employed=totalEmployed(item);const cash=Number(item.total_cash_rounded)||0;const invoice=Number(item.total_invoice)||0;const updateBadge=snap.updated_from_id?'<span class="opUpdate">Actualización de catálogo</span>':'';const hasItems=Array.isArray(item.items)&&item.items.length>0;return `<article class="opCard"><div class="opHead"><div class="opDate">${dateText(item.created_at)}</div><div class="opAddress">${escapeHtml(address)}</div><span class="opType">${type}</span>${updateBadge}</div><div class="opBody"><div class="opRow"><span>Distancia informada</span><b>${(Number(item.one_way_km)||0).toFixed(1)} km</b></div><div class="opRow"><span>Tiempo empleado</span><b>${minutesText(employed)}</b></div><div class="opRow"><span>Accesorios / repuestos</span><b>${escapeHtml(itemsSummary(item))}</b></div><div class="opRow opTotal"><span>Precio efectivo</span><b>${money(cash)}</b></div><div class="opRow opTotal"><span>Final IVA incluido</span><b>${money(invoice)}</b></div><div class="pdfActions"><button class="pdfBtn" type="button" onclick="openHistoryPdf('${escapeHtml(item.id)}')">Ver PDF</button><button class="pdfBtn share" type="button" onclick="shareHistoryPdf('${escapeHtml(item.id)}')">Compartir PDF</button><button class="pdfBtn" style="grid-column:1/-1" type="button" onclick="copyHistoryMessage(this)">Copiar mensaje</button></div>${hasItems?`<button class="updateBtn" type="button" onclick="updateCatalogPrices('${escapeHtml(item.id)}',this)">ACTUALIZAR ACCESORIOS A CATÁLOGO VIGENTE</button>`:''}<button class="detailBtn" type="button" onclick="toggleInternal('${escapeHtml(item.id)}',this)">Ver detalle interno</button>${internalDetail(item)}</div></article>`}
+async function issue(payload){const response=await fetch(ISSUE_URL,{method:'POST',headers:{'Content-Type':'application/json',apikey:SUPABASE_PUBLISHABLE,Authorization:'Bearer '+SUPABASE_PUBLISHABLE},body:JSON.stringify(payload)});const data=await response.json();if(!response.ok||!data.ok)throw new Error(data&&data.error?data.error:'No se pudo guardar la actualización');return data}
+function updatedCatalogPayload(item){const snap=item.snapshot||{},prices=snap.prices||{},rates=snap.rates||{},cfg=readConfig();const oldItems=Array.isArray(item.items)?item.items:[];let matched=0,unmatched=0;const newItems=oldItems.map(old=>{const found=(old.catalog_code&&PiocaCatalog.findByCode(old.catalog_code))||PiocaCatalog.findMatch(old.catalog_product||old.desc);if(!found){unmatched++;return {...old}}matched++;return {...old,source:'catalog',catalog_code:found.code,catalog_category:found.category,catalog_product:found.product,desc:found.description||found.product,price:found.cashPrice}});if(!matched)throw new Error('No pude vincular ningún accesorio de este presupuesto con el catálogo vigente.');const oldParts=oldItems.reduce((s,x)=>s+(Number(x.qty)||0)*(Number(x.price)||0),0);const newParts=newItems.reduce((s,x)=>s+(Number(x.qty)||0)*(Number(x.price)||0),0);const visitRounded=prices.visit_labor_rounded!==undefined?Number(prices.visit_labor_rounded):Math.max(0,(Number(item.total_cash_rounded)||0)-oldParts);const visitRaw=prices.visit_labor_raw!==undefined?Number(prices.visit_labor_raw):(Number(item.visit_labor_raw)||visitRounded);const cashRounded=visitRounded+newParts;const totalCashRaw=visitRaw+newParts;const pct=PiocaCatalog.invoicePercent(cfg);const iva=Number(item.iva_percent??prices.iva_percent??PiocaCatalog.ivaPercent(cfg));const transferBase=cashRounded*(1+pct/100);const ivaAmount=transferBase*(iva/100);const totalInvoice=transferBase+ivaAmount;const payload={mode:item.mode,customer_address:item.customer_address,customer_place_id:item.customer_place_id||null,service_lat:item.service_lat??null,service_lng:item.service_lng??null,started_at:item.started_at??null,finished_at:item.finished_at??null,one_way_km:Number(item.one_way_km)||0,round_trip_km:Number(item.round_trip_km)||0,one_way_minutes:Number(item.one_way_minutes)||0,round_trip_minutes:Number(item.round_trip_minutes)||0,labor_minutes:Number(item.labor_minutes)||0,toll_count:Number(item.toll_count)||0,items:newItems,rate_km:Number(item.rate_km??rates.km)||0,rate_travel_hour:Number(item.rate_travel_hour??rates.travel_hour)||0,rate_labor_hour:Number(item.rate_labor_hour??rates.labor_hour)||0,rate_toll:Number(item.rate_toll??rates.toll)||0,iva_percent:iva,cost_km:Number(item.cost_km)||0,cost_travel:Number(item.cost_travel)||0,cost_labor:Number(item.cost_labor)||0,cost_tolls:Number(item.cost_tolls)||0,cost_items:newParts,visit_labor_raw:visitRaw,total_cash_raw:totalCashRaw,total_cash_rounded:cashRounded,iva_amount:ivaAmount,total_invoice:totalInvoice,pdf_version:'r17-pdf-v4-catalogo',pdf_name:'piOca_Resumen_Servicio.pdf',snapshot:{...snap,updated_from_id:String(item.id),update_type:'catalog_only',updated_at:new Date().toISOString(),catalog_version:PiocaCatalog.load().version,items:newItems,prices:{...prices,parts:newParts,total_cash_raw:totalCashRaw,total_cash_rounded:cashRounded,transfer_surcharge_percent:pct,transfer_surcharge_amount:cashRounded*(pct/100),transfer_base:transferBase,iva_percent:iva,iva_amount:ivaAmount,total_invoice:totalInvoice},rates:{...rates}}};return {payload,matched,unmatched}}
+async function updateCatalogPrices(id,btn){const item=historyById.get(id);if(!item)return;const cat=PiocaCatalog.load();if(!cat.items.length){alert('Primero importá el catálogo desde Configuración.');return}if(!confirm('Se creará una NUEVA versión del presupuesto. Solo se actualizarán los accesorios vinculados al catálogo. Kilómetros, mano de obra, traslado y tiempo quedan iguales.'))return;const old=btn.textContent;btn.disabled=true;btn.textContent='ACTUALIZANDO…';try{const result=updatedCatalogPayload(item);await issue(result.payload);alert('Presupuesto actualizado. Accesorios actualizados: '+result.matched+(result.unmatched?' · Sin vincular: '+result.unmatched:'')+'. El original quedó intacto.');await loadHistory()}catch(e){alert('No se pudo actualizar: '+(e.message||String(e)))}finally{btn.disabled=false;btn.textContent=old}}
+async function openHistoryPdf(id){const item=historyById.get(id);if(!item)return;try{await PiocaPDF.openPdf(item)}catch(e){alert('No se pudo abrir el PDF: '+(e.message||String(e)))}}
+async function shareHistoryPdf(id){const item=historyById.get(id);if(!item)return;try{const result=await PiocaPDF.sharePdf(item);if(result&&result.messageCopied)alert('PDF compartido. El mensaje quedó copiado por si WhatsApp no lo agrega automáticamente.')}catch(e){if(e&&e.name==='AbortError')return;alert('No se pudo compartir el PDF: '+(e.message||String(e)))}}
+async function copyHistoryMessage(btn){const original=btn.textContent;try{const ok=await PiocaPDF.copyMessage();btn.textContent=ok?'Mensaje copiado':'No se pudo copiar'}catch(e){btn.textContent='No se pudo copiar'}setTimeout(()=>btn.textContent=original,1800)}
+function toggleInternal(id,btn){const box=document.getElementById('internal-'+id);if(!box)return;const hidden=box.classList.toggle('hidden');btn.textContent=hidden?'Ver detalle interno':'Ocultar detalle interno'}
+async function loadHistory(){const list=document.getElementById('historyList');list.innerHTML='<div class="loadingBox">Cargando historial…</div>';document.getElementById('refreshBtn').disabled=true;try{const items=await fetchHistory();if(!items.length){list.innerHTML='<div class="emptyBox">Todavía no hay operaciones emitidas.</div>';return}historyById.clear();items.forEach(item=>historyById.set(String(item.id),item));list.innerHTML=items.map(cardHtml).join('')}catch(e){list.innerHTML='<div class="errorBox">'+escapeHtml(e.message||String(e))+'</div>'}finally{document.getElementById('refreshBtn').disabled=false}}
+document.getElementById('refreshBtn').onclick=loadHistory;loadHistory();
+</script></body></html>
