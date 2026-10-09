@@ -288,7 +288,7 @@
       <div id="routeSummary" class="hidden">
         <div class="row2">
           <div class="kpi">
-            <span>Distancia total ida y vuelta</span>
+            <span>Kilómetros de traslado computados</span>
             <b id="routeKm">—</b>
           </div>
           <div class="kpi">
@@ -305,6 +305,18 @@
         <option value="2">2</option>
         <option value="3">3</option>
         <option value="4">4</option>
+        <option value="5">5</option>
+        <option value="6">6</option>
+        <option value="7">7</option>
+        <option value="8">8</option>
+        <option value="9">9</option>
+        <option value="10">10</option>
+        <option value="11">11</option>
+        <option value="12">12</option>
+        <option value="13">13</option>
+        <option value="14">14</option>
+        <option value="15">15</option>
+        <option value="16">16</option>
       </select>
 
       <label for="parts">¿Hubo accesorios o repuestos?</label>
@@ -337,6 +349,11 @@
         <div class="previewLine">
           <span>Tipo de cliente</span>
           <b id="previewCustomerType">—</b>
+        </div>
+
+        <div class="previewLine">
+          <span>Modalidad de traslado</span>
+          <b id="previewTravelMode">—</b>
         </div>
 
         <div class="previewLine">
@@ -394,11 +411,12 @@
 
 <div id="travelChoiceOverlay" class="travelChoiceOverlay hidden">
   <div class="travelChoiceBox">
-    <h3>¿Computar también el tiempo de traslado de regreso?</h3>
-    <p>Los kilómetros se calculan siempre ida y vuelta. Esta opción modifica únicamente el tiempo de traslado.</p>
+    <h3>¿Qué recorrido querés cobrar?</h3>
+    <p>Se calculan kilómetros y tiempo de traslado según la modalidad elegida. Los peajes se cargan por separado.</p>
     <div class="travelChoiceButtons">
-      <button class="azul" id="travelRoundTripBtn" type="button">SÍ, IDA Y VUELTA</button>
-      <button class="claro" id="travelOneWayBtn" type="button">NO, SOLO IDA</button>
+      <button class="claro" id="travelOneWayBtn" type="button">SOLO IDA · 1 TRAYECTO</button>
+      <button class="azul" id="travelRoundTripBtn" type="button">IDA Y VUELTA · 2 TRAYECTOS</button>
+      <button class="oscuro" id="travelDoubleVisitBtn" type="button">REPARACIÓN – DOBLE VISITA · 4 TRAYECTOS</button>
     </div>
   </div>
 </div>
@@ -417,7 +435,7 @@
 
 <script src="r17-catalog.js?v=20261008-3"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js"></script>
-<script src="r17-pdf.js?v=20261009-2"></script>
+<script src="r17-pdf.js?v=20261009-4"></script>
 <script>
 const SERVICE_KEY='r17_active_v1';
 const AUTO_CHECK_MS=120000;
@@ -742,29 +760,48 @@ function configReady(cfg){
 }
 
 
-function askReturnTravelTime(){
+/* Modalidades comerciales. La ruta original de Google nunca se altera. */
+function normalizeTravelBillingMode(mode,legacyIncludeReturn){
+  if(mode==='one_way' || mode==='round_trip' || mode==='double_visit') return mode;
+  return legacyIncludeReturn===false ? 'one_way' : 'round_trip';
+}
+
+function travelModeLabel(mode){
+  if(mode==='one_way') return 'Solo ida';
+  if(mode==='double_visit') return 'Reparación – doble visita';
+  return 'Ida y vuelta';
+}
+
+function billableRoute(route,mode){
+  if(!route || !route.one_way || !route.round_trip){
+    throw new Error('No se recibió una ruta completa de Google.');
+  }
+  const selected=normalizeTravelBillingMode(mode);
+  const kmOneWay=num(route.one_way.distance_km);
+  const minutesOneWay=num(route.one_way.duration_minutes);
+  const kmRoundTrip=num(route.round_trip.distance_km);
+  const minutesRoundTrip=num(route.round_trip.duration_minutes);
+  if([kmOneWay,minutesOneWay,kmRoundTrip,minutesRoundTrip].some(x=>!Number.isFinite(x)||x<0)){
+    throw new Error('La ruta contiene una distancia o un tiempo inválido.');
+  }
+  const billedKm=selected==='one_way'?kmOneWay:(selected==='double_visit'?kmRoundTrip*2:kmRoundTrip);
+  const billedMinutes=selected==='one_way'?minutesOneWay:(selected==='double_visit'?minutesRoundTrip*2:minutesRoundTrip);
+  return {mode:selected, label:travelModeLabel(selected), trips:selected==='double_visit'?2:1,
+    legs:selected==='double_visit'?4:(selected==='round_trip'?2:1),
+    billedKm,billedMinutes};
+}
+
+function askTravelBillingMode(){
   return new Promise(resolve=>{
     const overlay=$('travelChoiceOverlay');
-    const yes=$('travelRoundTripBtn');
-    const no=$('travelOneWayBtn');
-
-    overlay.classList.remove('hidden');
-
-    const cleanup=()=>{
-      yes.onclick=null;
-      no.onclick=null;
+    const buttons=[['travelOneWayBtn','one_way'],['travelRoundTripBtn','round_trip'],['travelDoubleVisitBtn','double_visit']];
+    function choose(mode){
+      buttons.forEach(([id])=>$(id).onclick=null);
       overlay.classList.add('hidden');
-    };
-
-    yes.onclick=()=>{
-      cleanup();
-      resolve(true);
-    };
-
-    no.onclick=()=>{
-      cleanup();
-      resolve(false);
-    };
+      resolve(mode);
+    }
+    buttons.forEach(([id,mode])=>$(id).onclick=()=>choose(mode));
+    overlay.classList.remove('hidden');
   });
 }
 
@@ -849,11 +886,10 @@ function calculateAmounts(){
   if(!configReady(cfg)) throw new Error('Faltan completar valores económicos en Configuración.');
   if(!currentRoute || !currentContext) throw new Error('Primero calculá la ruta.');
 
-  const routeKm=num(currentRoute.round_trip?.distance_km);
-  const includeReturnTravelTime=currentContext.includeReturnTravelTime!==false;
-  const travelMinutes=includeReturnTravelTime
-    ? num(currentRoute.round_trip?.duration_minutes)
-    : num(currentRoute.one_way?.duration_minutes);
+  const routeBilling=billableRoute(currentRoute,currentContext.travelBillingMode);
+  const routeKm=routeBilling.billedKm;
+  const travelMinutes=routeBilling.billedMinutes;
+  const includeReturnTravelTime=routeBilling.mode!=='one_way';
 
   let laborMinutes=0;
   if(currentContext.mode==='service'){
@@ -926,6 +962,8 @@ function calculateAmounts(){
 
   return {
     routeKm,travelMinutes,includeReturnTravelTime,laborMinutes,
+    travelBillingMode:routeBilling.mode,travelBillingLabel:routeBilling.label,
+    travelLegs:routeBilling.legs,travelVisits:routeBilling.trips,
     customerType,customerTypeLabel:customerTypeLabel(customerType),
     customerSurchargePercent,customerRateFactor,
     baseTravelRate,baseLaborRate,effectiveTravelRate,effectiveLaborRate,
@@ -957,6 +995,7 @@ function renderCommercialPreview(calc){
   $('previewLocationLabel').textContent=currentContext.mode==='service' ? 'Ubicación aproximada del cliente' : 'Ubicación';
   $('previewLocation').textContent=currentContext.customerAddress || (currentContext.mode==='service' ? serviceAddressForHistory() : 'Ubicación registrada');
   $('previewCustomerType').textContent=calc.customerTypeLabel;
+  $('previewTravelMode').textContent=calc.travelBillingLabel;
   $('previewTime').textContent=minutesText(calc.laborMinutes + calc.travelMinutes);
   $('previewCash').textContent=money(calc.cashRounded);
   $('previewPlusIva').textContent=money(calc.transferBase);
@@ -1008,16 +1047,9 @@ function renderCommercialPreview(calc){
 
 function showRoute(route){
   currentRoute=route;
-
-  const includeReturnTravelTime=
-    !currentContext || currentContext.includeReturnTravelTime!==false;
-
-  const billedTravelMinutes=includeReturnTravelTime
-    ? route.round_trip.duration_minutes
-    : route.one_way.duration_minutes;
-
-  $('routeKm').textContent=route.round_trip.distance_km.toFixed(1)+' km';
-  $('routeMinutes').textContent=Math.round(billedTravelMinutes)+' min';
+  const billed=billableRoute(route,currentContext&&currentContext.travelBillingMode);
+  $('routeKm').textContent=billed.billedKm.toFixed(1)+' km';
+  $('routeMinutes').textContent=Math.round(billed.billedMinutes)+' min';
   $('routeSummary').classList.remove('hidden');
   $('calcCard').classList.remove('hidden');
   $('calcCard').scrollIntoView({behavior:'smooth',block:'start'});
@@ -1408,7 +1440,7 @@ $('continueService').onclick=async()=>{
     return;
   }
 
-  const includeReturnTravelTime=await askReturnTravelTime();
+  const travelBillingMode=await askTravelBillingMode();
   const customerType=await askCustomerType();
 
   box.classList.remove('hidden');
@@ -1428,7 +1460,8 @@ $('continueService').onclick=async()=>{
     box.textContent='Ruta calculada correctamente.';
     currentContext={
       mode:'service',
-      includeReturnTravelTime,
+      travelBillingMode,
+      includeReturnTravelTime:travelBillingMode!=='one_way',
       customerType,
       customerAddress:
         (st && st.address)
@@ -1547,7 +1580,7 @@ $('quoteAddress').onclick=async()=>{
     return;
   }
 
-  const includeReturnTravelTime=await askReturnTravelTime();
+  const travelBillingMode=await askTravelBillingMode();
   const customerType=await askCustomerType();
 
   box.classList.remove('hidden');
@@ -1567,7 +1600,8 @@ $('quoteAddress').onclick=async()=>{
     box.textContent='Ruta calculada correctamente.';
     currentContext={
       mode:'quote',
-      includeReturnTravelTime,
+      travelBillingMode,
+      includeReturnTravelTime:travelBillingMode!=='one_way',
       customerType,
       customerAddress:customerAddress,
       customerPlaceId:selectedCustomerPlaceId
@@ -1863,6 +1897,11 @@ function issuedPayload(calc){
       labor_minutes:calc.laborMinutes,
       total_employed_minutes:calc.laborMinutes+calc.travelMinutes,
       billed_travel_minutes:calc.travelMinutes,
+      billed_distance_km:calc.routeKm,
+      travel_billing_mode:calc.travelBillingMode,
+      travel_billing_label:calc.travelBillingLabel,
+      travel_legs:calc.travelLegs,
+      travel_visits:calc.travelVisits,
       return_travel_time_computed:calc.includeReturnTravelTime,
       customer_type:calc.customerType,
       customer_type_label:calc.customerTypeLabel,
@@ -1873,6 +1912,8 @@ function issuedPayload(calc){
       items:calc.items,
       prices:{
         return_travel_time_computed:calc.includeReturnTravelTime,
+        travel_billing_mode:calc.travelBillingMode,
+        billed_distance_km:calc.routeKm,
         billed_travel_minutes:calc.travelMinutes,
         visit_labor_raw:calc.visitLaborRaw,
         visit_labor_rounded:calc.visitLaborRounded,
