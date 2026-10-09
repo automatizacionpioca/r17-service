@@ -339,6 +339,7 @@
         <button class="claro" id="openPdfBtn" type="button">VER PDF</button>
         <button class="azul" id="sharePdfBtn" type="button">COMPARTIR PDF</button>
         <button class="claro" id="copyMessageBtn" type="button" style="grid-column:1/-1">COPIAR MENSAJE</button>
+        <button class="azul" id="editIssuedBtn" type="button" style="grid-column:1/-1">EDITAR REPORTE</button>
         <div class="muted" style="grid-column:1/-1;text-align:center;font-size:12px">
           Para enviarlo, usá COMPARTIR PDF. El visor puede cambiar el nombre del archivo.
         </div>
@@ -1942,6 +1943,11 @@ $('issueBtn').onclick=async()=>{
   }
 };
 
+
+$('editIssuedBtn').onclick=()=>{
+  if(!lastIssuedRecord || !lastIssuedRecord.id) return;
+  window.location.href='edit.html?id='+encodeURIComponent(lastIssuedRecord.id);
+};
 
 $('openPdfBtn').onclick=async()=>{
   if(!lastIssuedRecord) return;
