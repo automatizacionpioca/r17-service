@@ -120,6 +120,75 @@
 .catalogSummary{margin-top:12px;padding:12px;border:1px solid #dfe6ee;border-radius:12px;background:#f7f9fc;font-size:13px;line-height:1.5}
 .catalogHistory{margin-top:10px;font-size:12px;color:#66717c}
 .catalogPreview{margin-top:10px;padding:10px 12px;border:1px solid #cfe0ef;border-radius:12px;background:#f2f8fd;font-size:12px;line-height:1.5}
+/* piOca: tarifas responsive sin desplazamiento lateral.
+   Solo cambia la representación; los importes mantienen los IDs originales
+   y siguen actualizándose desde renderClientRates(). */
+@media(max-width:680px){
+  .rateTableWrap{
+    overflow:visible;
+    border:0;
+    border-radius:0;
+    background:transparent;
+  }
+  .rateTable{
+    display:block;
+    width:100%;
+    min-width:0;
+    background:transparent;
+  }
+  .rateTable thead{display:none}
+  .rateTable tbody{
+    display:grid;
+    gap:12px;
+  }
+  .rateTable tbody tr{
+    display:block;
+    border:1px solid #dce5ef;
+    border-radius:14px;
+    overflow:hidden;
+    background:#fff;
+  }
+  .rateTable tbody td{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:10px;
+    padding:10px 13px;
+    border-bottom:1px solid #edf1f5;
+    font-size:13px;
+    line-height:1.35;
+    text-align:right;
+    white-space:normal;
+    min-width:0;
+    overflow-wrap:anywhere;
+    font-variant-numeric:tabular-nums;
+  }
+  .rateTable tbody td:first-child{
+    display:block;
+    padding:12px 13px;
+    background:#f0f5fb;
+    color:#1959a0;
+    font-size:14px;
+    font-weight:800;
+    text-align:left;
+  }
+  .rateTable tbody td:not(:first-child){
+    color:#203347;
+    font-weight:750;
+  }
+  .rateTable tbody td:not(:first-child)::before{
+    flex:1 1 auto;
+    min-width:0;
+    text-align:left;
+    color:#64758a;
+    font-size:12.5px;
+    font-weight:500;
+  }
+  .rateTable tbody td:nth-child(2)::before{content:"Traslado / h"}
+  .rateTable tbody td:nth-child(3)::before{content:"Mano de obra / h"}
+  .rateTable tbody td:nth-child(4)::before{content:"Valor por km"}
+  .rateTable tbody td:last-child{border-bottom:0}
+}
 @media(max-width:440px){.policyGrid,.catalogActions{grid-template-columns:1fr}}
 </style>
 </head>
