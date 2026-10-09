@@ -333,11 +333,28 @@
     doc.text('Detalle',margin,y);
     y+=9;
 
-    infoRow(
-      'Costo de visita y mano de obra',
-      money(r.visitRounded),
-      {blue:true,height:17}
-    );
+    // Visita/mano de obra: mismo borde derecho que todos los importes del PDF.
+    // El detalle descriptivo no expone las tarifas ni el cálculo interno.
+    ensureSpace(29);
+    const visitValueX=pageW-margin-7;
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(12.5);
+    setText(GREY);
+    doc.text('Costo de visita y mano de obra',margin,y);
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(12.5);
+    setText(BLUE);
+    doc.text(money(r.visitRounded),visitValueX,y,{align:'right'});
+    y+=7;
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(9.5);
+    setText(GREY);
+    const visitNote='Incluye traslado, costos operativos y recursos necesarios para realizar el servicio.';
+    const visitNoteLines=doc.splitTextToSize(visitNote,contentW-15);
+    doc.text(visitNoteLines,margin,y);
+    y+=Math.max(8,visitNoteLines.length*4.8)+3;
+    divider();
+    y+=5;
 
     if(r.items.length){
       ensureSpace(12+r.items.length*13);
@@ -406,8 +423,8 @@
       doc.setFillColor(LIGHT[0],LIGHT[1],LIGHT[2]);
       doc.setDrawColor(BORDER[0],BORDER[1],BORDER[2]);
       doc.roundedRect(margin,y,contentW,21,4,4,'FD');
-      doc.setFont('helvetica','normal');doc.setFontSize(13);setText(GREY);
-      doc.text('Descuento por pago efectivo',margin+7,y+13);
+      doc.setFont('helvetica','normal');doc.setFontSize(11.6);setText(GREY);
+      doc.text('Precio total para pago en efectivo',margin+7,y+13);
       doc.setFont('helvetica','bold');doc.setFontSize(17);setText(GREEN);
       doc.text(money(r.cash),pageW-margin-7,y+13.2,{align:'right'});
       y+=27;
