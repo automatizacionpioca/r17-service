@@ -150,55 +150,58 @@
 .catalogPriceHint b{color:#0d56a3}
 .itemManualBox{margin-top:8px}
 @media(max-width:440px){.catalogItemGrid{grid-template-columns:1fr}}
-/* Slogan piOca®: texto siempre centrado, brillo sutil sin desplazamientos laterales. */
+/* Franja psicológica piOca®: rectangular, centrada y con titilado sutil. */
 .piocaSignatureBand{
   position:relative;
   overflow:hidden;
   box-sizing:border-box;
-  margin:20px 0 5px;
-  padding:10px 15px;
-  border:1px solid #d8e4f1;
-  border-radius:15px;
-  background:linear-gradient(115deg,#f6f9fd 0%,#eaf2fc 45%,#f8fafc 85%);
-  background-size:220% 100%;
-  animation:piocaSignatureGlow 13s ease-in-out infinite alternate;
-  box-shadow:0 5px 20px rgba(17,52,95,.045);
-  min-height:44px;
+  margin:22px 0 6px;
+  padding:11px 16px;
+  border-top:1px solid #d5dbe3;
+  border-bottom:1px solid #d5dbe3;
+  border-left:0;
+  border-right:0;
+  border-radius:0;
+  background:#eef1f5;
+  min-height:46px;
   display:flex;
   align-items:center;
   justify-content:center;
   text-align:center;
 }
 .piocaSignatureTrack{
+  width:100%;
   display:flex;
   align-items:center;
   justify-content:center;
-  width:100%;
-  min-width:0;
   text-align:center;
 }
 .piocaSignaturePhrase{
-  display:block;
-  width:100%;
-  max-width:100%;
-  color:#274464;
-  font-size:11px;
-  font-weight:600;
-  letter-spacing:.1px;
-  line-height:1.55;
+  display:inline-block;
+  margin:0 auto;
+  color:#394958;
+  font-size:11.5px;
+  font-weight:700;
+  letter-spacing:.05px;
+  line-height:1.35;
   text-align:center;
-  white-space:normal;
+  white-space:nowrap;
+  animation:piocaSignaturePulse 2.35s ease-in-out infinite;
 }
-.piocaSignaturePhrase strong{color:#0e57a3;font-weight:800}
-@keyframes piocaSignatureGlow{
-  from{background-position:0% 50%}
-  to{background-position:100% 50%}
+.piocaSignaturePhrase strong{
+  color:#0e57a3;
+  font-weight:800;
+}
+@keyframes piocaSignaturePulse{
+  0%,100%{opacity:.82; text-shadow:0 0 0 rgba(14,87,163,0)}
+  50%{opacity:1; text-shadow:0 0 8px rgba(14,87,163,.14)}
 }
 @media(max-width:520px){
-  .piocaSignaturePhrase strong{display:block}
+  .piocaSignatureBand{padding:10px 12px;}
+  .piocaSignaturePhrase{font-size:10.4px;}
 }
 @media(prefers-reduced-motion:reduce){
-  .piocaSignatureBand{animation:none}
+  .piocaSignaturePhrase{animation:none}
 }
 </style>
 </head>
