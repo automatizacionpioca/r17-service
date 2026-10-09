@@ -150,6 +150,29 @@
 .catalogPriceHint b{color:#0d56a3}
 .itemManualBox{margin-top:8px}
 @media(max-width:440px){.catalogItemGrid{grid-template-columns:1fr}}
+/* Slogan piOca®: banda editorial compacta, sin interferir con controles. */
+.piocaSignatureBand{
+  position:relative;overflow:hidden;margin:20px 0 5px;
+  border:1px solid #d8e4f1;border-radius:15px;
+  background:linear-gradient(110deg,#f6f9fd 0%,#ecf3fb 52%,#f8fafc 100%);
+  box-shadow:0 5px 20px rgba(17,52,95,.045);
+  min-height:40px;display:flex;align-items:center;
+}
+.piocaSignatureBand::before,.piocaSignatureBand::after{
+  content:"";position:absolute;top:0;bottom:0;width:30px;z-index:1;pointer-events:none;
+}
+.piocaSignatureBand::before{left:0;background:linear-gradient(90deg,#f6f9fd,transparent)}
+.piocaSignatureBand::after{right:0;background:linear-gradient(270deg,#f8fafc,transparent)}
+.piocaSignatureTrack{
+  display:flex;align-items:center;gap:38px;white-space:nowrap;width:max-content;
+  animation:piocaSloganDesliza 34s linear infinite;
+}
+.piocaSignaturePhrase{display:inline-flex;align-items:center;gap:11px;padding:0 8px;
+  color:#274464;font-size:11px;font-weight:600;letter-spacing:.12px}
+.piocaSignaturePhrase strong{color:#0e57a3;font-weight:800}
+.piocaSignatureDot{width:4px;height:4px;border-radius:50%;background:#9cb5ce;flex:none}
+@keyframes piocaSloganDesliza{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+@media(prefers-reduced-motion:reduce){.piocaSignatureTrack{animation:none}}
 </style>
 </head>
 <body>
@@ -326,6 +349,13 @@
 
   </section>
 
+  <div class="piocaSignatureBand" aria-label="No cobramos por lo que hacemos, cobramos por lo que sabemos.">
+    <div class="piocaSignatureTrack" aria-hidden="true">
+      <span class="piocaSignaturePhrase"><span class="piocaSignatureDot"></span>No cobramos por lo que hacemos, <strong>cobramos por lo que sabemos.</strong><span class="piocaSignatureDot"></span></span>
+      <span class="piocaSignaturePhrase"><span class="piocaSignatureDot"></span>No cobramos por lo que hacemos, <strong>cobramos por lo que sabemos.</strong><span class="piocaSignatureDot"></span></span>
+    </div>
+  </div>
+
   <div class="footerNote">piOca® · uso interno</div>
 </main>
 
@@ -368,6 +398,7 @@ let currentRoute=null;
 let currentContext=null;
 let lastPreviewCalc=null;
 let lastIssuedRecord=null;
+let emissionInProgress=false;
 let selectedCustomerPlaceId=null;
 let selectedCustomerText='';
 let autocompleteTimer=null;
@@ -399,6 +430,7 @@ function resetCalculationBoard(options={}){
   currentContext=null;
   lastPreviewCalc=null;
   lastIssuedRecord=null;
+  emissionInProgress=false;
 
   if(autocompleteTimer){
     clearTimeout(autocompleteTimer);
@@ -443,6 +475,12 @@ function resetCalculationBoard(options={}){
   $('issueStatus').classList.add('hidden');
   $('issueStatus').textContent='';
   $('pdfActions').classList.add('hidden');
+  $('previewBtn').disabled=false;
+  $('discardCalculation').disabled=false;
+  $('discardCalculation').textContent='DESCARTAR SERVICIO';
+  $('discardCalculation').classList.add('rojo');
+  $('discardCalculation').classList.remove('verde');
+  $('newService').textContent='DESCARTAR Y NUEVO SERVICIO';
 
   $('serviceRouteState').classList.add('hidden');
   $('serviceRouteState').textContent='';
@@ -453,6 +491,33 @@ function resetCalculationBoard(options={}){
 
   $('travelChoiceOverlay').classList.add('hidden');
   $('customerTypeOverlay').classList.add('hidden');
+}
+
+/* Un reporte ya guardado se CIERRA, nunca se descarta del historial. */
+function actualizarControlesEmision(){
+  const emitido=!!lastIssuedRecord;
+  const cerrar=$('discardCalculation');
+  cerrar.textContent=emitido?'CERRAR SERVICIO':'DESCARTAR SERVICIO';
+  cerrar.classList.toggle('verde',emitido);
+  cerrar.classList.toggle('rojo',!emitido);
+  cerrar.disabled=emissionInProgress;
+  $('newService').textContent=emitido?'CERRAR SERVICIO':'DESCARTAR Y NUEVO SERVICIO';
+  $('newService').disabled=emissionInProgress;
+  // Evita volver a emitir accidentalmente la misma operación mientras
+  // el reporte está guardado; la edición persistente requiere backend.
+  $('previewBtn').disabled=emitido||emissionInProgress;
+  if(emitido){
+    $('issueBtn').disabled=true;
+    $('issueBtn').textContent='EMITIDO';
+  }
+}
+
+function cerrarOperacionEnPantalla(){
+  clearState();
+  resetCalculationBoard();
+  setModeVisibility(null);
+  render();
+  window.scrollTo({top:0,behavior:'smooth'});
 }
 
 function readConfig(){
@@ -1347,11 +1412,13 @@ $('continueService').onclick=async()=>{
 };
 
 $('newService').onclick=()=>{
+  if(emissionInProgress) return;
+  if(lastIssuedRecord){
+    cerrarOperacionEnPantalla();
+    return;
+  }
   if(confirm('¿Descartar este servicio y comenzar uno nuevo?')){
-    clearState();
-    resetCalculationBoard();
-    setModeVisibility(null);
-    render();
+    cerrarOperacionEnPantalla();
   }
 };
 
@@ -1482,6 +1549,11 @@ $('quoteAddress').onclick=async()=>{
 };
 
 $('discardCalculation').onclick=()=>{
+  if(emissionInProgress) return;
+  if(lastIssuedRecord){
+    cerrarOperacionEnPantalla();
+    return;
+  }
   const st=readState();
   const mode=currentContext && currentContext.mode
     ? currentContext.mode
@@ -1493,14 +1565,7 @@ $('discardCalculation').onclick=()=>{
 
   if(!confirm(question)) return;
 
-  if(mode==='service'){
-    clearState();
-  }
-
-  resetCalculationBoard();
-  setModeVisibility(null);
-  render();
-  window.scrollTo({top:0,behavior:'smooth'});
+  cerrarOperacionEnPantalla();
 };
 
 let itemSeq=0;
@@ -1837,11 +1902,14 @@ async function issueToHistory(payload){
 }
 
 $('issueBtn').onclick=async()=>{
+  if(emissionInProgress || lastIssuedRecord) return;
   const status=$('issueStatus');
 
   status.classList.remove('hidden');
   status.textContent='Emitiendo y guardando en Historial…';
   $('issueBtn').disabled=true;
+  emissionInProgress=true;
+  actualizarControlesEmision();
 
   try{
     const calc=calculateAmounts();
@@ -1855,16 +1923,22 @@ $('issueBtn').onclick=async()=>{
     };
 
     localStorage.setItem('r17_last_issued_v1',JSON.stringify(lastIssuedRecord));
-
-    // Generamos el PDF al emitir. Los botones lo abren o comparten.
-    await PiocaPDF.build(lastIssuedRecord);
-
-    status.textContent='Emitido correctamente, guardado en Historial y PDF generado.';
-    $('issueBtn').textContent='EMITIDO';
+    // El guardado es la autoridad: si falla sólo la generación del PDF,
+    // NO se habilita un segundo EMITIR, que duplicaría la operación.
+    try{
+      await PiocaPDF.build(lastIssuedRecord);
+      status.textContent='Emitido correctamente, guardado en Historial y PDF generado.';
+    }catch(pdfError){
+      status.textContent='Reporte guardado en Historial. El PDF no pudo generarse: '+
+        (pdfError.message||String(pdfError))+'. Podés reintentarlo con VER PDF.';
+    }
     $('pdfActions').classList.remove('hidden');
   }catch(e){
     status.textContent='No se pudo emitir: '+(e.message||String(e));
-    $('issueBtn').disabled=false;
+  }finally{
+    emissionInProgress=false;
+    $('issueBtn').disabled=!!lastIssuedRecord;
+    actualizarControlesEmision();
   }
 };
 
@@ -1915,6 +1989,7 @@ $('copyMessageBtn').onclick=async()=>{
 };
 
 $('previewBtn').onclick=()=>{
+  if(lastIssuedRecord || emissionInProgress) return;
   const errorBox=$('previewError');
 
   errorBox.classList.add('hidden');
