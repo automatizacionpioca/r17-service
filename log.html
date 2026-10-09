@@ -203,17 +203,23 @@ function toggleInternal(id,btn){const box=document.getElementById('internal-'+id
 async function loadHistory(){const list=document.getElementById('historyList');list.innerHTML='<div class="loadingBox">Cargando historial…</div>';document.getElementById('refreshBtn').disabled=true;try{const items=await fetchHistory();if(!items.length){list.innerHTML='<div class="emptyBox">Todavía no hay operaciones emitidas.</div>';return}historyById.clear();items.forEach(item=>historyById.set(String(item.id),item));list.innerHTML=items.map(cardHtml).join('')}catch(e){list.innerHTML='<div class="errorBox">'+escapeHtml(e.message||String(e))+'</div>'}finally{document.getElementById('refreshBtn').disabled=false}}
 
 const MANAGE_URL='https://apxrmkdegjnblkbyjsbp.supabase.co/functions/v1/r17-manage';
+const R17_PIN_SESSION_KEY='pioca_admin_pin_session';
 let r17ManagementKey='';
 function r17AskManagementKey(){
   if(r17ManagementKey) return r17ManagementKey;
-  const key=prompt('Clave administrativa para modificar o eliminar reportes:');
-  if(!key) return '';
-  r17ManagementKey=String(key).trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
+  try{r17ManagementKey=sessionStorage.getItem(R17_PIN_SESSION_KEY)||'';}catch(e){}
+  if(/^\d{6}$/.test(r17ManagementKey))return r17ManagementKey;
+  r17ManagementKey='';
+  const key=prompt('PIN de administrador (6 números):');
+  if(key===null||key==='')return '';
+  if(!/^\d{6}$/.test(String(key).trim()))throw new Error('El PIN debe tener exactamente 6 números.');
+  r17ManagementKey=String(key).trim();
+  try{sessionStorage.setItem(R17_PIN_SESSION_KEY,r17ManagementKey);}catch(e){}
   return r17ManagementKey;
 }
 async function r17Manage(body){
   const key=r17AskManagementKey();
-  if(!key) throw new Error('Acción cancelada. No se ingresó clave administrativa.');
+  if(!key) throw new Error('Acción cancelada. No se ingresó el PIN.');
   const response=await fetch(MANAGE_URL,{
     method:'POST',
     headers:{'Content-Type':'application/json','apikey':SUPABASE_PUBLISHABLE,'Authorization':'Bearer '+SUPABASE_PUBLISHABLE},
@@ -221,7 +227,7 @@ async function r17Manage(body){
   });
   let data;try{data=await response.json()}catch(e){throw new Error('Respuesta inválida del servidor.');}
   if(!response.ok||!data.ok){
-    if(response.status===401||response.status===403) r17ManagementKey='';
+    if(response.status===401||response.status===403){r17ManagementKey='';try{sessionStorage.removeItem(R17_PIN_SESSION_KEY)}catch(e){}}
     throw new Error((data.error||'No se pudo completar la operación')+(data.detail?' · '+data.detail:''));
   }
   return data;
