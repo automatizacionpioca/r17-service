@@ -321,6 +321,21 @@
     </div>
 
     <div class="card">
+      <h2>Acceso administrativo</h2>
+      <p>Elegí tu PIN de 6 números para autorizar la edición o eliminación de reportes. Si querés cambiarlo, ingresá primero el PIN actual.</p>
+      <label for="currentAdminPin">PIN actual</label>
+      <input id="currentAdminPin" type="password" inputmode="numeric" maxlength="6" minlength="6" autocomplete="off" placeholder="6 números">
+      <div class="policyGrid">
+        <div><label for="newAdminPin">PIN nuevo</label>
+          <input id="newAdminPin" type="password" inputmode="numeric" maxlength="6" minlength="6" autocomplete="off" placeholder="6 números"></div>
+        <div><label for="confirmAdminPin">Repetir PIN nuevo</label>
+          <input id="confirmAdminPin" type="password" inputmode="numeric" maxlength="6" minlength="6" autocomplete="off" placeholder="6 números"></div>
+      </div>
+      <button class="azul" id="changeAdminPin" type="button">CAMBIAR PIN ADMINISTRATIVO</button>
+      <div id="adminPinStatus" class="status hidden" role="status"></div>
+      <p class="muted" style="margin-top:9px;font-size:12px">El PIN se verifica en Supabase. No se guarda dentro del código público y se recuerda solamente durante esta sesión.</p>
+    </div>
+    <div class="card">
       <h2>Catálogo de accesorios y repuestos</h2>
       <p>El Excel contiene un único precio: efectivo. Cada producto define su IVA y se organiza por Categoría → Fabricante / proveedor → Producto / modelo.</p>
 
@@ -806,6 +821,38 @@ $('applyDiscount').onclick=()=>{
     $('catalogDiscount').value='0';$('catalogPreview').classList.add('hidden');
     $('catalogOk').textContent='Descuento aplicado y registrado con fecha. Catálogo versión '+cat.version+'.';$('catalogOk').classList.remove('hidden');renderCatalog();
   }catch(e){$('catalogError').textContent=e.message||String(e);$('catalogError').classList.remove('hidden')}
+};
+
+const ADMIN_PIN_SESSION_KEY='pioca_admin_pin_session';
+$('changeAdminPin').onclick=async()=>{
+  const btn=$('changeAdminPin');
+  const message=$('adminPinStatus');
+  const current=$('currentAdminPin').value.trim();
+  const next=$('newAdminPin').value.trim();
+  const confirmPin=$('confirmAdminPin').value.trim();
+  message.className='status hidden';
+  function notify(text,isError){message.textContent=text;message.className='status '+(isError?'error':'ok');}
+  if(!/^\d{6}$/.test(current)||!/^\d{6}$/.test(next)){
+    notify('Ambos PIN deben tener exactamente 6 números.',true);return;
+  }
+  if(next!==confirmPin){notify('La confirmación del PIN nuevo no coincide.',true);return;}
+  if(current===next){notify('El PIN nuevo tiene que ser diferente del actual.',true);return;}
+  if(!confirm('¿Querés cambiar el PIN de administrador? El PIN anterior dejará de funcionar.'))return;
+  btn.disabled=true;
+  notify('Cambiando el PIN…',false);
+  try{
+    const response=await fetch('https://apxrmkdegjnblkbyjsbp.supabase.co/functions/v1/r17-manage',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','apikey':SUPABASE_PUBLISHABLE,'Authorization':'Bearer '+SUPABASE_PUBLISHABLE},
+      body:JSON.stringify({action:'change_pin',admin_key:current,new_pin:next})
+    });
+    let data={};try{data=await response.json();}catch(e){}
+    if(!response.ok||!data.ok)throw Error(data.error||'No se pudo cambiar el PIN.');
+    $('currentAdminPin').value='';$('newAdminPin').value='';$('confirmAdminPin').value='';
+    try{sessionStorage.setItem(ADMIN_PIN_SESSION_KEY,next);}catch(e){}
+    notify('PIN actualizado correctamente en Supabase.',false);
+  }catch(e){notify(e.message||String(e),true);}
+  finally{btn.disabled=false;}
 };
 
 load();
