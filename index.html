@@ -150,29 +150,56 @@
 .catalogPriceHint b{color:#0d56a3}
 .itemManualBox{margin-top:8px}
 @media(max-width:440px){.catalogItemGrid{grid-template-columns:1fr}}
-/* Slogan piOca®: banda editorial compacta, sin interferir con controles. */
+/* Slogan piOca®: texto siempre centrado, brillo sutil sin desplazamientos laterales. */
 .piocaSignatureBand{
-  position:relative;overflow:hidden;margin:20px 0 5px;
-  border:1px solid #d8e4f1;border-radius:15px;
-  background:linear-gradient(110deg,#f6f9fd 0%,#ecf3fb 52%,#f8fafc 100%);
+  position:relative;
+  overflow:hidden;
+  box-sizing:border-box;
+  margin:20px 0 5px;
+  padding:10px 15px;
+  border:1px solid #d8e4f1;
+  border-radius:15px;
+  background:linear-gradient(115deg,#f6f9fd 0%,#eaf2fc 45%,#f8fafc 85%);
+  background-size:220% 100%;
+  animation:piocaSignatureGlow 13s ease-in-out infinite alternate;
   box-shadow:0 5px 20px rgba(17,52,95,.045);
-  min-height:40px;display:flex;align-items:center;
+  min-height:44px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
 }
-.piocaSignatureBand::before,.piocaSignatureBand::after{
-  content:"";position:absolute;top:0;bottom:0;width:30px;z-index:1;pointer-events:none;
-}
-.piocaSignatureBand::before{left:0;background:linear-gradient(90deg,#f6f9fd,transparent)}
-.piocaSignatureBand::after{right:0;background:linear-gradient(270deg,#f8fafc,transparent)}
 .piocaSignatureTrack{
-  display:flex;align-items:center;gap:38px;white-space:nowrap;width:max-content;
-  animation:piocaSloganDesliza 34s linear infinite;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  width:100%;
+  min-width:0;
+  text-align:center;
 }
-.piocaSignaturePhrase{display:inline-flex;align-items:center;gap:11px;padding:0 8px;
-  color:#274464;font-size:11px;font-weight:600;letter-spacing:.12px}
+.piocaSignaturePhrase{
+  display:block;
+  width:100%;
+  max-width:100%;
+  color:#274464;
+  font-size:11px;
+  font-weight:600;
+  letter-spacing:.1px;
+  line-height:1.55;
+  text-align:center;
+  white-space:normal;
+}
 .piocaSignaturePhrase strong{color:#0e57a3;font-weight:800}
-.piocaSignatureDot{width:4px;height:4px;border-radius:50%;background:#9cb5ce;flex:none}
-@keyframes piocaSloganDesliza{from{transform:translateX(0)}to{transform:translateX(-50%)}}
-@media(prefers-reduced-motion:reduce){.piocaSignatureTrack{animation:none}}
+@keyframes piocaSignatureGlow{
+  from{background-position:0% 50%}
+  to{background-position:100% 50%}
+}
+@media(max-width:520px){
+  .piocaSignaturePhrase strong{display:block}
+}
+@media(prefers-reduced-motion:reduce){
+  .piocaSignatureBand{animation:none}
+}
 </style>
 </head>
 <body>
@@ -351,9 +378,8 @@
   </section>
 
   <div class="piocaSignatureBand" aria-label="No cobramos por lo que hacemos, cobramos por lo que sabemos.">
-    <div class="piocaSignatureTrack" aria-hidden="true">
-      <span class="piocaSignaturePhrase"><span class="piocaSignatureDot"></span>No cobramos por lo que hacemos, <strong>cobramos por lo que sabemos.</strong><span class="piocaSignatureDot"></span></span>
-      <span class="piocaSignaturePhrase"><span class="piocaSignatureDot"></span>No cobramos por lo que hacemos, <strong>cobramos por lo que sabemos.</strong><span class="piocaSignatureDot"></span></span>
+    <div class="piocaSignatureTrack">
+      <span class="piocaSignaturePhrase">No cobramos por lo que hacemos, <strong>cobramos por lo que sabemos.</strong></span>
     </div>
   </div>
 
