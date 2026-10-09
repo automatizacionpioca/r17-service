@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Editar reporte | piOca®</title><link rel="stylesheet" href="styles.css">
+<style>
+.editCard{padding:16px;border:1px solid #dde6ef;background:#fff;border-radius:16px;margin-bottom:14px}
+.editGrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.editCard label{display:block;font-weight:700;color:#30475f;margin:10px 0 5px;font-size:13px}
+.editCard input,.editCard select{display:block;width:100%;box-sizing:border-box;border:1px solid #cfdbe6;border-radius:11px;padding:11px 12px;font:inherit;background:#fff;color:#243448}
+.editRow{border-top:1px solid #e5edf5;margin-top:12px;padding-top:12px}
+.editActions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+.editActions button{flex:1;min-width:130px}
+.editMuted{color:#667586;font-size:12px;line-height:1.5}
+.editPill{display:inline-block;background:#eaf3ff;color:#195da8;padding:6px 9px;border-radius:9px;font-size:12px;font-weight:700}
+.editTotals{background:#f2f7fc;border-radius:12px;padding:14px;line-height:1.6}
+.editTotals strong{color:#0e59a6}
+.editDanger{background:#fff3f3;color:#932b34;border:1px solid #ecd0d0;padding:12px;border-radius:10px}
+@media(max-width:450px){.editGrid{grid-template-columns:1fr}.editActions{display:grid;grid-template-columns:1fr 1fr}.editActions button{min-width:0}}
+</style></head><body>
+<main class="shell"><header class="head"><div class="brandMark" style="background:transparent;box-shadow:none;border-radius:0"><img src="https://automatizacionpioca.github.io/pioca-gps/logo-pioca.png" alt="piOca®" style="width:100%;height:auto;display:block"></div><div><h1>Editar reporte</h1><p>Modificación del registro existente, sin duplicados.</p></div></header>
+<nav class="nav"><a href="index.html">Nuevo</a><a href="log.html">Historial</a><a href="cfg.html">Configuración</a></nav>
+<section class="body"><div class="editCard" id="loadStatus">Cargando reporte original…</div>
+<div id="editor" hidden>
+<div class="editCard"><span class="editPill">CONSERVAMOS DIRECCIÓN, RECORRIDO Y TIEMPOS</span><h2 id="editAddress" style="margin:13px 0 7px"></h2><p id="originalInfo" class="editMuted"></p><label for="customerType">Volvé a seleccionar el tipo de cliente</label><select id="customerType" required><option value="">— Seleccioná el tipo de cliente —</option><option value="particular">Particular</option><option value="consorcio">Consorcio / edificio</option><option value="industria">Industria</option></select><div class="editGrid"><div><label for="tolls">Cantidad de peajes</label><input type="number" id="tolls" min="0" max="50" step="1" value="0"></div><div><label>Identificador del reporte</label><div class="editMuted" id="recordId"></div></div></div></div>
+<div class="editCard"><h2>Accesorios y repuestos</h2><p class="editMuted">Podés agregar, reemplazar o quitar productos. Los repuestos anteriores mantienen el precio registrado hasta que vos decidas cambiarlo.</p><div id="itemsList"></div><div class="editActions"><button type="button" class="azul" id="addCatalog">+ DEL CATÁLOGO</button><button type="button" class="claro" id="addManual">+ PERSONALIZADO</button></div></div>
+<div class="editCard"><h2>Confirmar modificación</h2><p class="editMuted">Al guardar, se modifica el mismo reporte y se genera su PDF actualizado. No se altera la fecha original ni el registro GPS.</p><div class="editActions"><button type="button" class="verde" id="saveChanges">GUARDAR CAMBIOS</button><button type="button" class="claro" id="cancelChanges">CANCELAR SIN GUARDAR</button></div><div id="saveStatus" class="editMuted" role="status"></div></div>
+</div></section><div class="footerNote">piOca® · uso interno</div></main>
+<script src="r17-catalog.js?v=20261008-3"></script>
+<script>
+(function(){
+  'use strict';
+  const $=id=>document.getElementById(id);
+  const url='https://apxrmkdegjnblkbyjsbp.supabase.co/functions/v1/';
+  const publicKey='sb_publishable_htgEX8HiRGAjpCVhPw1gfg_tOPxkJoI';
+  const id=new URLSearchParams(window.location.search).get('id');
+  const q=(s)=>String(s??'');
+  const n=x=>Number.isFinite(Number(x))?Number(x):0;
+  const mx=v=>Math.max(0,n(v));
+  const money=v=>new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0}).format(n(v));
+  let original=null, currentRevision=0, adminKey='';
+  let number=0;
+  const opts=(list,first)=>'<option value="">'+first+'</option>'+list.map(x=>'<option value="'+escapeAttr(x)+'">'+escapeText(x)+'</option>').join('');
+  function escapeText(v){return q(v).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');}
+  function escapeAttr(v){return escapeText(v);}
+  function addItem(item=null){
+    number++;
+    const row=document.createElement('div'); row.className='editRow';row.dataset.no=String(number);
+    row.dataset.source=(item&&item.source==='catalog')?'catalog':'manual';
+    row.dataset.code=q(item&&item.catalog_code);
+    row.innerHTML='<div style="display:flex;gap:8px;justify-content:space-between;align-items:center"><strong>Ítem '+number+'</strong><button type="button" class="claro removeItem" style="width:auto;margin:0">QUITAR</button></div>'+
+    '<div class="editGrid"><div><label>Categoría</label><select class="cat"></select></div><div><label>Fabricante / proveedor (interno)</label><select class="supplier" disabled></select></div><div><label>Producto / modelo</label><select class="product" disabled></select></div><div><label>Cantidad</label><input type="number" class="qty" min="1" step="1"></div></div>'+
+    '<label>Descripción que verá el cliente</label><input type="text" class="description" maxlength="300">'+
+    '<div class="editGrid"><div><label>Precio efectivo unitario ($)</label><input type="number" class="price" min="0" step="0.01"></div><div><label>IVA del producto (%)</label><input type="number" class="iva" min="0" max="100" step="0.01"></div></div>';
+    $('itemsList').appendChild(row);
+    const cat=row.querySelector('.cat'),sup=row.querySelector('.supplier'),product=row.querySelector('.product');
+    const desc=row.querySelector('.description'),price=row.querySelector('.price'),iva=row.querySelector('.iva');
+    cat.innerHTML=opts(PiocaCatalog.categories(),'Ítem personalizado');
+    cat.onchange=()=>{
+      row.dataset.source=cat.value?'catalog':'manual';row.dataset.code='';
+      if(!cat.value){sup.innerHTML='';sup.disabled=true;product.innerHTML='';product.disabled=true;desc.readOnly=price.readOnly=iva.readOnly=false;return;}
+      sup.innerHTML=opts(PiocaCatalog.suppliers(cat.value),'Seleccionar fabricante');sup.disabled=false;
+      product.innerHTML='';product.disabled=true;
+    };
+    sup.onchange=()=>{
+      product.innerHTML=opts(PiocaCatalog.products(cat.value,sup.value).map(x=>x.product),'Seleccionar producto');
+      product.disabled=!sup.value;
+    };
+    product.onchange=()=>{
+      const found=PiocaCatalog.products(cat.value,sup.value).find(x=>x.product===product.value);
+      if(!found) return;
+      row.dataset.source='catalog';row.dataset.code=found.code;
+      desc.value=found.description||found.product;
+      price.value=found.cashPrice;
+      iva.value=PiocaCatalog.productIvaPercent(found,10.5);
+      desc.readOnly=price.readOnly=iva.readOnly=true;
+    };
+    row.querySelector('.removeItem').onclick=()=>row.remove();
+    row.querySelector('.qty').value=Math.max(1,n(item?.qty||1));
+    desc.value=q(item?.desc||'');price.value=item?mx(item.price):'';iva.value=item?mx(item.iva_percent??10.5):10.5;
+    // Conservar tal cual los precios e IVA históricos; el usuario decide si los reemplaza.
+    if(item?.source==='catalog'){
+      const found=PiocaCatalog.findByCode(item.catalog_code);
+      if(found){
+        cat.value=found.category;cat.dispatchEvent(new Event('change'));
+        sup.value=found.supplier;sup.dispatchEvent(new Event('change'));
+        product.value=found.product;
+        row.dataset.source='catalog';row.dataset.code=q(item.catalog_code);
+        desc.readOnly=price.readOnly=iva.readOnly=true;
+      }else{
+        row.dataset.source='manual';row.dataset.code='';
+      }
+    }
+    return row;
+  }
+  function readItems(){
+    return Array.from($('itemsList').children).map(row=>{
+      const item={
+        source:row.dataset.source==='catalog'?'catalog':'manual',
+        catalog_code:row.dataset.code||null,
+        catalog_category:row.querySelector('.cat').value||null,
+        catalog_supplier:row.querySelector('.supplier').value||null,
+        catalog_product:row.querySelector('.product').value||null,
+        qty:Number(row.querySelector('.qty').value),
+        desc:row.querySelector('.description').value.trim(),
+        price:Number(row.querySelector('.price').value),
+        iva_percent:Number(row.querySelector('.iva').value)
+      };
+      if(!Number.isInteger(item.qty)||item.qty<1||item.qty>10000)throw Error('Cantidad inválida en un accesorio.');
+      if(!item.desc)throw Error('Ingresá la descripción de todos los accesorios.');
+      if(!Number.isFinite(item.price)||item.price<0||row.querySelector('.price').value==='')throw Error('Precio efectivo inválido en un accesorio.');
+      if(!Number.isFinite(item.iva_percent)||item.iva_percent<0||item.iva_percent>100)throw Error('IVA inválido en un accesorio.');
+      return item;
+    });
+  }
+  async function load(){
+    if(!id||!/^[a-f0-9-]{36}$/i.test(id))throw Error('El identificador del reporte no es válido.');
+    const r=await fetch(url+'r17-history?id='+encodeURIComponent(id),{headers:{apikey:publicKey,Authorization:'Bearer '+publicKey}});
+    const data=await r.json();if(!r.ok||!data.ok)throw Error(data.error||'No se encontró el reporte.');
+    original=data.item;currentRevision=Number(original.snapshot?.edit_revision)||0;
+    $('editAddress').textContent=original.customer_address||'Servicio';
+    $('recordId').textContent=q(original.id).slice(0,14)+'…';
+    $('originalInfo').textContent='Se conservarán '+n(original.round_trip_km).toFixed(1)+' km ida y vuelta y '+Math.round(n(original.labor_minutes))+' minutos de mano de obra. Emisión: '+new Date(original.created_at).toLocaleString('es-AR')+'.';
+    $('tolls').value=Number(original.toll_count)||0;
+    (Array.isArray(original.items)?original.items:[]).forEach(item=>addItem(item));
+    $('loadStatus').hidden=true;$('editor').hidden=false;
+  }
+  $('addCatalog').onclick=()=>{
+    if(!PiocaCatalog.activeCount()){alert('Primero importá el catálogo en Configuración. Podés agregar un ítem personalizado mientras tanto.');return;}
+    const row=addItem();row.querySelector('.cat').focus();
+  };
+  $('addManual').onclick=()=>{const row=addItem();row.querySelector('.description').focus();};
+  $('cancelChanges').onclick=()=>window.location.href='log.html';
+  $('saveChanges').onclick=async()=>{
+    const button=$('saveChanges');const status=$('saveStatus');
+    try{
+      const customerType=$('customerType').value;
+      if(!customerType)throw Error('Tenés que volver a seleccionar el tipo de cliente.');
+      const tolls=Number($('tolls').value);
+      if(!Number.isInteger(tolls)||tolls<0||tolls>50)throw Error('La cantidad de peajes no es válida.');
+      const items=readItems();
+      if(!confirm('¿Guardar los cambios sobre ESTE MISMO REPORTE? Se conservará su identificador y no se creará otro.'))return;
+      if(!adminKey){
+        const entered=prompt('Clave administrativa para modificar reportes:');
+        if(!entered)return;
+        adminKey=q(entered).trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
+      }
+      const cfg=JSON.parse(localStorage.getItem('r17_cfg_v1')||'{}');
+      const pct=customerType==='consorcio'?Number(cfg.consorcioPct??25):customerType==='industria'?Number(cfg.industriaPct??68):0;
+      button.disabled=true;status.textContent='Guardando modificación sobre el reporte original…';
+      const r=await fetch(url+'r17-manage',{
+        method:'POST',
+        headers:{'Content-Type':'application/json',apikey:publicKey,Authorization:'Bearer '+publicKey},
+        body:JSON.stringify({action:'update',id,admin_key:adminKey,expected_revision:currentRevision,customer_type:customerType,customer_surcharge_percent:pct,toll_count:tolls,items,catalog_version:PiocaCatalog.load().version})
+      });
+      const data=await r.json();
+      if(!r.ok||!data.ok){if(r.status===401||r.status===403)adminKey='';throw Error(data.error||'No se pudo modificar el reporte.');}
+      // Evitar que la pantalla Nuevo conserve la versión antigua.
+      try{const last=JSON.parse(localStorage.getItem('r17_last_issued_v1')||'null');if(last&&String(last.id)===String(id))localStorage.removeItem('r17_last_issued_v1');}catch(e){}
+      alert('Reporte actualizado correctamente. Se conservó el mismo registro.');
+      window.location.href='log.html';
+    }catch(e){status.textContent=e.message||String(e);}finally{button.disabled=false;}
+  };
+  load().catch(e=>{$('loadStatus').className='editCard editDanger';$('loadStatus').textContent='No se pudo cargar el reporte: '+(e.message||String(e));});
+})();
+</script></body></html>
