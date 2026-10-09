@@ -166,7 +166,8 @@
       ivaAmount,
       invoice,
       mixedTax,
-      customerType
+      customerType,
+      travelBillingMode:snap.travel_billing_mode||'legacy'
     };
   }
 
@@ -335,7 +336,7 @@
 
     // Visita/mano de obra: mismo borde derecho que todos los importes del PDF.
     // El detalle descriptivo no expone las tarifas ni el cálculo interno.
-    ensureSpace(29);
+    ensureSpace(r.travelBillingMode==='double_visit'?38:29);
     const visitValueX=pageW-margin-7;
     doc.setFont('helvetica','normal');
     doc.setFontSize(12.5);
@@ -350,7 +351,11 @@
     doc.setFontSize(9.5);
     setText(GREY);
     const visitNote='Incluye traslado, costos operativos y recursos necesarios para realizar el servicio.';
-    const visitNoteLines=doc.splitTextToSize(visitNote,contentW-15);
+    const doubleVisitNote='Reparación con dos visitas: retiro y posterior reinstalación del componente.';
+    const visitNoteLines=doc.splitTextToSize(
+      r.travelBillingMode==='double_visit' ? visitNote+' '+doubleVisitNote : visitNote,
+      contentW-15
+    );
     doc.text(visitNoteLines,margin,y);
     y+=Math.max(8,visitNoteLines.length*4.8)+3;
     divider();
