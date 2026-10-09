@@ -119,7 +119,11 @@
     original=data.item;currentRevision=Number(original.snapshot?.edit_revision)||0;
     $('editAddress').textContent=original.customer_address||'Servicio';
     $('recordId').textContent=q(original.id).slice(0,14)+'…';
-    $('originalInfo').textContent='Se conservarán '+n(original.round_trip_km).toFixed(1)+' km ida y vuelta y '+Math.round(n(original.labor_minutes))+' minutos de mano de obra. Emisión: '+new Date(original.created_at).toLocaleString('es-AR')+'.';
+    const snap=original.snapshot||{};
+    const billingMode=snap.travel_billing_mode;
+    const label=billingMode==='double_visit'?'Reparación – doble visita (4 trayectos)':billingMode==='one_way'?'Solo ida':billingMode==='round_trip'?'Ida y vuelta':'Recorrido histórico';
+    const billedKm=snap.billed_distance_km!==undefined?n(snap.billed_distance_km):n(original.round_trip_km);
+    $('originalInfo').textContent='Modalidad: '+label+' · Kilómetros facturables: '+billedKm.toFixed(1)+' km · Traslado: '+Math.round(n(snap.billed_travel_minutes??original.round_trip_minutes))+' min · Mano de obra registrada: '+Math.round(n(original.labor_minutes))+' min. Emisión: '+new Date(original.created_at).toLocaleString('es-AR')+'.';
     $('tolls').value=Number(original.toll_count)||0;
     (Array.isArray(original.items)?original.items:[]).forEach(item=>addItem(item));
     $('loadStatus').hidden=true;$('editor').hidden=false;
