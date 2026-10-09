@@ -14,7 +14,7 @@
 .opBody{padding:14px 16px 16px}.opRow{display:flex;justify-content:space-between;gap:14px;padding:8px 0;border-bottom:1px solid #edf1f5}.opRow:last-child{border-bottom:0}.opRow span{color:#718093}.opRow b{color:#26384c;text-align:right}.opTotal b{color:#0d5db0;font-size:18px}
 .pdfActions{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:10px}.pdfBtn,.detailBtn,.updateBtn{border:1px solid #cfd9e5;background:#fff;color:#243448;border-radius:12px;padding:11px 10px;font-weight:800;cursor:pointer}.pdfBtn.share{background:#1769b5;color:#fff;border-color:#1769b5}.detailBtn,.updateBtn{width:100%;margin-top:12px}.updateBtn{background:#eef8f0;border-color:#bcdcc4;color:#25683a}
 .internal{margin-top:12px;padding:12px;border-radius:12px;background:#f6f8fb;border:1px solid #e0e6ed}.internalTitle{font-weight:800;color:#47586b;margin-bottom:6px}.internal .opRow{font-size:13px}
-.errorBox{background:#fff1f1;color:#a42b2b;border:1px solid #f0caca;border-radius:14px;padding:14px}.loadingBox,.emptyBox{background:#f7f9fc;color:#68788b;border:1px solid #dfe6ee;border-radius:14px;padding:18px;text-align:center}
+.opDelete{border:1px solid #e6c3c3;border-radius:8px;background:#fff;color:#b52c35;font-weight:900;padding:5px 11px;font-size:18px;cursor:pointer;float:right;margin-left:8px}.opEdit{border:1px solid #bfd5ee;border-radius:8px;background:#eff6ff;color:#165a9e;font-weight:700;padding:8px 11px;font-size:12px;cursor:pointer;float:right}.opHead::after{content:"";display:block;clear:both}.errorBox{background:#fff1f1;color:#a42b2b;border:1px solid #f0caca;border-radius:14px;padding:14px}.loadingBox,.emptyBox{background:#f7f9fc;color:#68788b;border:1px solid #dfe6ee;border-radius:14px;padding:18px;text-align:center}
 </style>
 </head>
 <body>
@@ -41,7 +41,7 @@ async function fetchHistory(){const response=await fetch(HISTORY_URL,{method:'GE
 function totalEmployed(item){const snap=item.snapshot||{};if(snap.total_employed_minutes!==undefined)return Number(snap.total_employed_minutes)||0;return (Number(item.round_trip_minutes)||0)+(Number(item.labor_minutes)||0)}
 function itemsSummary(item){const items=Array.isArray(item.items)?item.items:[];if(!items.length)return 'Sin accesorios / repuestos';return items.map(x=>(Number(x.qty)||0)+' × '+(x.desc||'Ítem')).join(' · ')}
 function internalDetail(item){const snap=item.snapshot||{},rates=snap.rates||{},prices=snap.prices||{};return `<div class="internal hidden" id="internal-${escapeHtml(item.id)}"><div class="internalTitle">Detalle interno</div><div class="opRow"><span>Distancia ida</span><b>${(Number(item.one_way_km)||0).toFixed(1)} km</b></div><div class="opRow"><span>Distancia ida y vuelta</span><b>${(Number(item.round_trip_km)||0).toFixed(1)} km</b></div><div class="opRow"><span>Traslado</span><b>${minutesText(snap.billed_travel_minutes!==undefined?snap.billed_travel_minutes:item.round_trip_minutes)}</b></div><div class="opRow"><span>Trabajo</span><b>${minutesText(item.labor_minutes)}</b></div><div class="opRow"><span>Peajes</span><b>${Number(item.toll_count)||0}</b></div><div class="opRow"><span>Valor/km usado</span><b>${money(rates.km)}</b></div><div class="opRow"><span>Hora traslado usada</span><b>${money(rates.travel_hour)}</b></div><div class="opRow"><span>Hora mano de obra usada</span><b>${money(rates.labor_hour)}</b></div><div class="opRow"><span>Diferencial facturado</span><b>${Number(prices.transfer_surcharge_percent??12)}%</b></div><div class="opRow"><span>Catálogo</span><b>V${snap.catalog_version??'—'}</b></div></div>`}
-function cardHtml(item){const snap=item.snapshot||{};const type=item.mode==='service'?'Servicio en domicilio':'Cotización anticipada';const address=item.customer_address||'Sin ubicación';const employed=totalEmployed(item);const cash=Number(item.total_cash_rounded)||0;const invoice=Number(item.total_invoice)||0;const updateBadge=snap.updated_from_id?'<span class="opUpdate">Actualización de catálogo</span>':'';const hasItems=Array.isArray(item.items)&&item.items.length>0;return `<article class="opCard"><div class="opHead"><div class="opDate">${dateText(item.created_at)}</div><div class="opAddress">${escapeHtml(address)}</div><span class="opType">${type}</span>${updateBadge}</div><div class="opBody"><div class="opRow"><span>Distancia informada</span><b>${(Number(item.one_way_km)||0).toFixed(1)} km</b></div><div class="opRow"><span>Tiempo empleado</span><b>${minutesText(employed)}</b></div><div class="opRow"><span>Accesorios / repuestos</span><b>${escapeHtml(itemsSummary(item))}</b></div><div class="opRow opTotal"><span>Precio efectivo</span><b>${money(cash)}</b></div><div class="opRow opTotal"><span>Final IVA incluido</span><b>${money(invoice)}</b></div><div class="pdfActions"><button class="pdfBtn" type="button" onclick="openHistoryPdf('${escapeHtml(item.id)}')">Ver PDF</button><button class="pdfBtn share" type="button" onclick="shareHistoryPdf('${escapeHtml(item.id)}')">Compartir PDF</button><button class="pdfBtn" style="grid-column:1/-1" type="button" onclick="copyHistoryMessage(this)">Copiar mensaje</button></div>${hasItems?`<button class="updateBtn" type="button" onclick="updateCatalogPrices('${escapeHtml(item.id)}',this)">ACTUALIZAR ACCESORIOS A CATÁLOGO VIGENTE</button>`:''}<button class="detailBtn" type="button" onclick="toggleInternal('${escapeHtml(item.id)}',this)">Ver detalle interno</button>${internalDetail(item)}</div></article>`}
+function cardHtml(item){const snap=item.snapshot||{};const type=item.mode==='service'?'Servicio en domicilio':'Cotización anticipada';const address=item.customer_address||'Sin ubicación';const employed=totalEmployed(item);const cash=Number(item.total_cash_rounded)||0;const invoice=Number(item.total_invoice)||0;const updateBadge=(snap.updated_from_id?'<span class="opUpdate">Actualización de catálogo</span>':'')+(snap.edited_at?'<span class="opUpdate">Reporte editado</span>':'');const hasItems=Array.isArray(item.items)&&item.items.length>0;return `<article class="opCard"><div class="opHead"><button type="button" class="opDelete" title="Eliminar reporte" aria-label="Eliminar reporte" onclick="deleteReport('${escapeHtml(item.id)}')">×</button><button type="button" class="opEdit" onclick="editReport('${escapeHtml(item.id)}')">EDITAR</button><div class="opDate">${dateText(item.created_at)}</div><div class="opAddress">${escapeHtml(address)}</div><span class="opType">${type}</span>${updateBadge}</div><div class="opBody"><div class="opRow"><span>Distancia informada</span><b>${(Number(item.one_way_km)||0).toFixed(1)} km</b></div><div class="opRow"><span>Tiempo empleado</span><b>${minutesText(employed)}</b></div><div class="opRow"><span>Accesorios / repuestos</span><b>${escapeHtml(itemsSummary(item))}</b></div><div class="opRow opTotal"><span>Precio efectivo</span><b>${money(cash)}</b></div><div class="opRow opTotal"><span>Final IVA incluido</span><b>${money(invoice)}</b></div><div class="pdfActions"><button class="pdfBtn" type="button" onclick="openHistoryPdf('${escapeHtml(item.id)}')">Ver PDF</button><button class="pdfBtn share" type="button" onclick="shareHistoryPdf('${escapeHtml(item.id)}')">Compartir PDF</button><button class="pdfBtn" style="grid-column:1/-1" type="button" onclick="copyHistoryMessage(this)">Copiar mensaje</button></div>${hasItems?`<button class="updateBtn" type="button" onclick="updateCatalogPrices('${escapeHtml(item.id)}',this)">ACTUALIZAR ACCESORIOS A CATÁLOGO VIGENTE</button>`:''}<button class="detailBtn" type="button" onclick="toggleInternal('${escapeHtml(item.id)}',this)">Ver detalle interno</button>${internalDetail(item)}</div></article>`}
 async function issue(payload){const response=await fetch(ISSUE_URL,{method:'POST',headers:{'Content-Type':'application/json',apikey:SUPABASE_PUBLISHABLE,Authorization:'Bearer '+SUPABASE_PUBLISHABLE},body:JSON.stringify(payload)});const data=await response.json();if(!response.ok||!data.ok)throw new Error(data&&data.error?data.error:'No se pudo guardar la actualización');return data}
 function aggregateIva(rows){
   const map=new Map();
@@ -201,5 +201,49 @@ async function shareHistoryPdf(id){const item=historyById.get(id);if(!item)retur
 async function copyHistoryMessage(btn){const original=btn.textContent;try{const ok=await PiocaPDF.copyMessage();btn.textContent=ok?'Mensaje copiado':'No se pudo copiar'}catch(e){btn.textContent='No se pudo copiar'}setTimeout(()=>btn.textContent=original,1800)}
 function toggleInternal(id,btn){const box=document.getElementById('internal-'+id);if(!box)return;const hidden=box.classList.toggle('hidden');btn.textContent=hidden?'Ver detalle interno':'Ocultar detalle interno'}
 async function loadHistory(){const list=document.getElementById('historyList');list.innerHTML='<div class="loadingBox">Cargando historial…</div>';document.getElementById('refreshBtn').disabled=true;try{const items=await fetchHistory();if(!items.length){list.innerHTML='<div class="emptyBox">Todavía no hay operaciones emitidas.</div>';return}historyById.clear();items.forEach(item=>historyById.set(String(item.id),item));list.innerHTML=items.map(cardHtml).join('')}catch(e){list.innerHTML='<div class="errorBox">'+escapeHtml(e.message||String(e))+'</div>'}finally{document.getElementById('refreshBtn').disabled=false}}
+
+const MANAGE_URL='https://apxrmkdegjnblkbyjsbp.supabase.co/functions/v1/r17-manage';
+let r17ManagementKey='';
+function r17AskManagementKey(){
+  if(r17ManagementKey) return r17ManagementKey;
+  const key=prompt('Clave administrativa para modificar o eliminar reportes:');
+  if(!key) return '';
+  r17ManagementKey=String(key).trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
+  return r17ManagementKey;
+}
+async function r17Manage(body){
+  const key=r17AskManagementKey();
+  if(!key) throw new Error('Acción cancelada. No se ingresó clave administrativa.');
+  const response=await fetch(MANAGE_URL,{
+    method:'POST',
+    headers:{'Content-Type':'application/json','apikey':SUPABASE_PUBLISHABLE,'Authorization':'Bearer '+SUPABASE_PUBLISHABLE},
+    body:JSON.stringify({...body,admin_key:key})
+  });
+  let data;try{data=await response.json()}catch(e){throw new Error('Respuesta inválida del servidor.');}
+  if(!response.ok||!data.ok){
+    if(response.status===401||response.status===403) r17ManagementKey='';
+    throw new Error((data.error||'No se pudo completar la operación')+(data.detail?' · '+data.detail:''));
+  }
+  return data;
+}
+function editReport(id){
+  window.location.href='edit.html?id='+encodeURIComponent(id);
+}
+async function deleteReport(id){
+  const item=historyById.get(String(id));
+  if(!item) return;
+  if(!confirm('¿Eliminar definitivamente el reporte de '+(item.customer_address||'este servicio')+'? Esta acción NO se puede deshacer.')) return;
+  if(!confirm('CONFIRMACIÓN FINAL: ¿Borrar este reporte del historial de forma permanente?')) return;
+  try{
+    await r17Manage({action:'delete',id});
+    try{
+      const current=JSON.parse(localStorage.getItem('r17_last_issued_v1')||'null');
+      if(current&&String(current.id)===String(id))localStorage.removeItem('r17_last_issued_v1');
+    }catch(e){}
+    await loadHistory();
+    alert('Reporte eliminado definitivamente.');
+  }catch(e){alert('No se eliminó el reporte: '+(e.message||String(e)));}
+}
+
 document.getElementById('refreshBtn').onclick=loadHistory;loadHistory();
 </script></body></html>
