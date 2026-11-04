@@ -198,7 +198,26 @@
     return fecha+'_'+sanitizeFilePart(r.address)+'.pdf';
   }
 
+  let pdfLoaderV3 = null;
+  function asegurarPdfV3(){
+    if(window.jspdf && window.jspdf.jsPDF) return Promise.resolve();
+    if(pdfLoaderV3) return pdfLoaderV3;
+    pdfLoaderV3=new Promise(function(resolve,reject){
+      const script=document.createElement('script');
+      script.src='https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js';
+      script.async=true;
+      script.onload=function(){
+        if(window.jspdf && window.jspdf.jsPDF) resolve();
+        else reject(new Error('No se pudo inicializar el generador de PDF.'));
+      };
+      script.onerror=function(){reject(new Error('No se pudo descargar el generador PDF. Verificá la conexión.'));};
+      document.head.appendChild(script);
+    }).catch(function(error){pdfLoaderV3=null;throw error;});
+    return pdfLoaderV3;
+  }
+
   async function build(record){
+    await asegurarPdfV3();
     if(!window.jspdf || !window.jspdf.jsPDF){
       throw new Error('No se pudo cargar el generador de PDF.');
     }

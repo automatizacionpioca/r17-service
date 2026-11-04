@@ -269,7 +269,23 @@
     return items;
   }
 
+  let excelLoaderV3=null;
+  function asegurarExcelV3(){
+    if(window.XLSX) return Promise.resolve();
+    if(excelLoaderV3) return excelLoaderV3;
+    excelLoaderV3=new Promise(function(resolve,reject){
+      const script=document.createElement('script');
+      script.src='https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+      script.async=true;
+      script.onload=function(){window.XLSX?resolve():reject(new Error('No se pudo iniciar Excel.'));};
+      script.onerror=function(){reject(new Error('No se pudo descargar Excel. Verificá Internet.'));};
+      document.head.appendChild(script);
+    }).catch(function(error){excelLoaderV3=null;throw error;});
+    return excelLoaderV3;
+  }
+
   async function importFile(file){
+    await asegurarExcelV3();
     if(!file) throw new Error('Seleccioná un archivo Excel.');
     if(!window.XLSX) throw new Error('No se pudo cargar el lector de Excel.');
     const data=await file.arrayBuffer();
@@ -404,13 +420,15 @@
     return true;
   }
 
-  function downloadCurrent(){
+  async function downloadCurrent(){
+    await asegurarExcelV3();
     const current=load();
     const stamp=new Date().toISOString().slice(0,10);
     return saveWorkbook(workbookCurrent(),'Catalogo_piOca_v'+current.version+'_'+stamp+'.xlsx');
   }
 
-  function downloadTemplate(){
+  async function downloadTemplate(){
+    await asegurarExcelV3();
     return saveWorkbook(workbookTemplate(),'Catalogo_piOca_PLANTILLA.xlsx');
   }
 

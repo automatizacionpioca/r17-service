@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Configuración</title>
+<link rel="preconnect" href="https://automatizacionpioca.github.io">
+<link rel="preconnect" href="https://apxrmkdegjnblkbyjsbp.supabase.co" crossorigin>
 <link rel="stylesheet" href="styles.css">
 <style>
 .autocompleteWrap{position:relative}
@@ -371,7 +373,7 @@
   <div class="footerNote">piOca® · uso interno</div>
 </main>
 
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<!-- R17 V3: Excel se descarga sólo al importar/exportar catálogo. -->
 <script src="r17-catalog.js?v=20261008-3"></script>
 <script>
 const ids=['base','km','travel','labor','toll','iva','facturadoPct','consorcioPct','industriaPct'];
@@ -778,8 +780,8 @@ $('iva').addEventListener('input',renderCommercialPolicy);
 $('saveCommercial').onclick=saveCommercialPolicy;
 $('importCatalog').onclick=()=>$('catalogFile').click();
 $('catalogFile').onchange=()=>{const f=$('catalogFile').files&&$('catalogFile').files[0];if(f) importCatalogFile(f)};
-$('downloadCatalog').onclick=()=>{try{PiocaCatalog.downloadCurrent()}catch(e){alert(e.message||String(e))}};
-$('downloadTemplate').onclick=()=>{try{PiocaCatalog.downloadTemplate()}catch(e){alert(e.message||String(e))}};
+$('downloadCatalog').onclick=async()=>{try{await PiocaCatalog.downloadCurrent()}catch(e){alert(e.message||String(e))}};
+$('downloadTemplate').onclick=async()=>{try{await PiocaCatalog.downloadTemplate()}catch(e){alert(e.message||String(e))}};
 $('previewIncrease').onclick=()=>{
   try{
     const p=PiocaCatalog.previewIncrease($('catalogIncrease').value);
